@@ -11,6 +11,7 @@ import { SessionRecorder, downloadText } from './session.js';
 import { EMOTIONS, EMOTION_BY_ID } from './emotions.js';
 import { STATES } from './states.js';
 import { startPrivacyMonitor } from './privacy.js';
+import { PersonalModel } from './model.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -23,6 +24,7 @@ const btnStartBig = $('#btn-start-big');
 const btnSwitch = $('#btn-switch');
 const selCamera = $('#sel-camera');
 const btnCalibrate = $('#btn-calibrate');
+const btnTrain = $('#btn-train');
 const selOverlay = $('#sel-overlay');
 const selReactivity = $('#sel-reactivity');
 const chkHide = $('#chk-hide-video');
@@ -141,6 +143,7 @@ async function startCamera(opts = {}) {
     btnStart.classList.remove('primary');
     btnSwitch.disabled = false;
     btnCalibrate.disabled = false;
+    btnTrain.disabled = false;
     btnRecord.disabled = false;
     selCamera.disabled = false;
     await refreshDeviceList();
@@ -172,8 +175,10 @@ function stopCamera() {
   btnStart.classList.add('primary');
   btnSwitch.disabled = true;
   btnCalibrate.disabled = true;
+  btnTrain.disabled = true;
   btnRecord.disabled = true;
   selCamera.disabled = true;
+  if (training) training.cancelled = true;
   setStageMessage('Fotocamera spenta.', { showButton: true });
   perf.textContent = delegate ? `${delegate} · in pausa` : '—';
 }
@@ -291,6 +296,7 @@ function processFrame() {
     if (r.face && r.temporal.events.length) handleEvents(r.temporal.events);
 
     if (analyzer.calibrating || calib.dataset.active === '1') updateCalibrationUi(now, r);
+    if (analyzer.capturing) updateTrainingUi(now, r);
 
     if (now - lastUi > 100) {
       lastUi = now;
@@ -382,6 +388,131 @@ function updateCalibrationStatus() {
   }
 }
 updateCalibrationStatus();
+
+// ---------- Addestramento guidato sul viso della persona ----------
+// Per ogni emozione: istruzioni, conto alla rovescia, 2,5 s di registrazione.
+// Si salvano solo i vettori numerici medi (nessuna immagine).
+const TRAIN_STEPS = [
+  { id: 'neutral', text: 'Viso rilassato, bocca chiusa, sguardo verso lo schermo. Serve anche come calibrazione.' },
+  { id: 'joy', text: 'Sorriso pieno, come quando vedi una persona cara: sorridono anche gli occhi.' },
+  { id: 'surprise', text: 'Alza le sopracciglia, spalanca gli occhi e lascia cadere la mandibola.' },
+  { id: 'sadness', text: 'Angoli della bocca in giù, parte interna delle sopracciglia in su, sguardo un po\' basso.' },
+  { id: 'anger', text: 'Sopracciglia aggrottate e abbassate, sguardo fisso, labbra serrate.' },
+  { id: 'fear', text: 'Sopracciglia alzate e avvicinate, occhi sgranati, labbra tirate indietro.' },
+  { id: 'disgust', text: 'Arriccia il naso e solleva il labbro superiore, come davanti a un cattivo odore.' },
+  { id: 'contempt', text: 'Solleva e stringi un solo angolo della bocca, in un mezzo sorriso sprezzante.' },
+];
+const trainBox = $('#train');
+let training = null;
+
+let captureTitle = '';
+function updateTrainingUi(now, r) {
+  $('#train-bar').style.transform = `scaleX(${analyzer.captureProgress(now)})`;
+  $('#train-title').textContent = r.face ? captureTitle : 'Volto non visibile!';
+}
+
+function sleep(ms) { return new Promise((res) => setTimeout(res, ms)); }
+
+async function runTraining() {
+  if (!running) { toast('Avvia prima la fotocamera'); return; }
+  if (training) return;
+  training = { cancelled: false, skip: false };
+  btnTrain.disabled = true;
+  btnCalibrate.disabled = true;
+  trainBox.hidden = false;
+  const samples = {};
+  try {
+    for (let i = 0; i < TRAIN_STEPS.length; i++) {
+      const step = TRAIN_STEPS[i];
+      const e = EMOTION_BY_ID[step.id];
+      training.skip = false;
+      trainBox.classList.remove('capturing');
+      $('#train-emoji').textContent = e.emoji;
+      $('#train-text').textContent = step.text;
+      $('#train-bar').style.transform = 'scaleX(0)';
+      for (const n of [3, 2, 1]) {
+        if (training.cancelled || training.skip) break;
+        $('#train-title').textContent = `${i + 1}/${TRAIN_STEPS.length} · ${e.label} — preparati… ${n}`;
+        await sleep(700);
+      }
+      if (training.cancelled) break;
+      if (training.skip) continue;
+      trainBox.classList.add('capturing');
+      captureTitle = `${i + 1}/${TRAIN_STEPS.length} · ${e.label} — mantieni l'espressione!`;
+      $('#train-title').textContent = captureTitle;
+      const got = await analyzer.capture(2500);
+      if (training.cancelled) break;
+      if (training.skip || !got) continue;
+      if (got.length < 8) {
+        toast(`⚠️ ${e.label}: volto poco visibile, passo saltato`);
+        continue;
+      }
+      // Scarta i primi fotogrammi (transizione verso l'espressione).
+      const kept = got.slice(Math.floor(got.length * 0.25));
+      samples[step.id] = kept.map((s) => s.x);
+      if (step.id === 'neutral') {
+        analyzer.calibrateFrom(kept);
+        updateCalibrationStatus();
+      }
+    }
+    if (!training.cancelled) {
+      const model = PersonalModel.train(samples);
+      analyzer.setPersonal(model);
+      const similar = similarPairs(model);
+      toast(similar ? `✅ Addestramento completato · ${similar} molto simili: puoi ripeterle più marcate`
+        : '✅ Addestramento completato: ora riconosco le tue espressioni');
+    }
+  } catch (err) {
+    toast(`⚠️ ${err.message}`);
+  } finally {
+    analyzer.cancelCapture();
+    trainBox.hidden = true;
+    training = null;
+    btnTrain.disabled = !running;
+    btnCalibrate.disabled = !running;
+    updatePersonalStatus();
+  }
+}
+
+// Coppie di espressioni registrate quasi uguali (difficili da distinguere).
+function similarPairs(model) {
+  const { centroids, weights, temperature } = model.data;
+  const ids = Object.keys(centroids);
+  const out = [];
+  for (let a = 0; a < ids.length; a++) {
+    for (let b = a + 1; b < ids.length; b++) {
+      let d = 0;
+      for (let j = 0; j < weights.length; j++) d += weights[j] * (centroids[ids[a]][j] - centroids[ids[b]][j]) ** 2;
+      if (d < 1.2 * temperature) out.push(`${EMOTION_BY_ID[ids[a]].label} e ${EMOTION_BY_ID[ids[b]].label}`);
+    }
+  }
+  return out.slice(0, 2).join(', ');
+}
+
+btnTrain.addEventListener('click', runTraining);
+$('#btn-train-hint').addEventListener('click', runTraining);
+$('#btn-train-skip').addEventListener('click', () => { if (training) { training.skip = true; analyzer.cancelCapture(); } });
+$('#btn-train-cancel').addEventListener('click', () => { if (training) { training.cancelled = true; analyzer.cancelCapture(); } });
+$('#btn-personal-reset').addEventListener('click', () => {
+  analyzer.clearPersonal();
+  updatePersonalStatus();
+  toast('Addestramento personale eliminato');
+});
+
+function updatePersonalStatus() {
+  const s = $('#personal-status');
+  const p = analyzer.personal;
+  if (p) {
+    const d = new Date(p.data.created);
+    const names = p.ids.map((id) => EMOTION_BY_ID[id].emoji).join(' ');
+    s.textContent = `Modello personale del ${d.toLocaleDateString('it-IT')} (${p.ids.length}/8: ${names})`;
+    $('#btn-personal-reset').hidden = false;
+  } else {
+    s.textContent = 'Nessun addestramento personale: si usa il modello generico.';
+    $('#btn-personal-reset').hidden = true;
+  }
+}
+updatePersonalStatus();
 
 // ---------- Registrazione della sessione (solo numeri) ----------
 function startRecording() {

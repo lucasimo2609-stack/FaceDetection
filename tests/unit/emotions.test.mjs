@@ -15,7 +15,7 @@ const dominant = (b, geom = restGeom()) => {
 // Prototipi FACS (EMFACS) espressi in blendshape MediaPipe.
 const PROTOTYPES = {
   neutral: [{}, restGeom()],
-  joy: [{ mouthSmileLeft: 0.85, mouthSmileRight: 0.85, eyeSquintLeft: 0.55, eyeSquintRight: 0.55, mouthUpperUpLeft: 0.5, mouthUpperUpRight: 0.5, browDownLeft: 0.5, browDownRight: 0.5 }, restGeom({ lipGapRatio: 0.15 })],
+  joy: [{ mouthSmileLeft: 0.85, mouthSmileRight: 0.85, eyeSquintLeft: 0.72, eyeSquintRight: 0.68, mouthUpperUpLeft: 0.5, mouthUpperUpRight: 0.5, browDownLeft: 0.5, browDownRight: 0.5 }, restGeom({ lipGapRatio: 0.15 })],
   sadness: [{ browInnerUp: 0.6, browDownLeft: 0.3, browDownRight: 0.3, mouthFrownLeft: 0.3, mouthFrownRight: 0.3, mouthShrugLower: 0.35 }, restGeom()],
   surprise: [{ browInnerUp: 0.75, browOuterUpLeft: 0.65, browOuterUpRight: 0.65, eyeWideLeft: 0.45, eyeWideRight: 0.45, jawOpen: 0.55 }, restGeom({ lipGapRatio: 0.35, ear: 0.45 })],
   fear: [{ browInnerUp: 0.7, browOuterUpLeft: 0.4, browOuterUpRight: 0.4, browDownLeft: 0.35, browDownRight: 0.35, eyeWideLeft: 0.45, eyeWideRight: 0.45, mouthStretchLeft: 0.35, mouthStretchRight: 0.35, jawOpen: 0.2 }, restGeom({ lipGapRatio: 0.12, ear: 0.42 })],

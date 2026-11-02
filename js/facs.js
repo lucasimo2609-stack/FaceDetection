@@ -26,35 +26,37 @@ export const BLENDSHAPE_NAMES = [
 ];
 
 // [valore a riposo tipico, valore a massima espressione tipico].
-// I blendshape di MediaPipe hanno dinamiche molto diverse fra loro (ad es.
-// cheekSquint raramente supera 0.4 anche in un sorriso pieno, mentre
-// mouthSmile arriva a 0.9): questi intervalli li riportano su una scala comune.
-// Dopo la calibrazione il valore a riposo viene sostituito da quello misurato.
+// Ricavati da ~3.500 volti etichettati: mediana dei volti neutri e 97° percentile
+// di tutti i volti. I blendshape di MediaPipe hanno dinamiche molto diverse:
+// eyeWide non supera quasi mai 0,15, eyeSquint vale già ~0,36 su un viso
+// neutro, mouthFrown arriva a ~0,25, mentre mouthSmile arriva a 0,9; noseSneer e
+// cheekSquint restano quasi sempre a zero. Questi intervalli li riportano su
+// una scala comune. Dopo la calibrazione il valore a riposo è quello misurato.
 const DEFAULT_RANGE = {
-  browDownLeft: [0.05, 0.7], browDownRight: [0.05, 0.7],
-  browInnerUp: [0.08, 0.8],
-  browOuterUpLeft: [0.04, 0.7], browOuterUpRight: [0.04, 0.7],
-  cheekPuff: [0.02, 0.55],
-  cheekSquintLeft: [0.02, 0.4], cheekSquintRight: [0.02, 0.4],
-  eyeBlinkLeft: [0.1, 0.8], eyeBlinkRight: [0.1, 0.8],
-  eyeSquintLeft: [0.12, 0.7], eyeSquintRight: [0.12, 0.7],
-  eyeWideLeft: [0.03, 0.55], eyeWideRight: [0.03, 0.55],
-  jawForward: [0.01, 0.4], jawLeft: [0.01, 0.35], jawRight: [0.01, 0.35],
-  jawOpen: [0.02, 0.85],
-  mouthClose: [0.01, 0.4],
-  mouthDimpleLeft: [0.02, 0.4], mouthDimpleRight: [0.02, 0.4],
-  mouthFrownLeft: [0.01, 0.4], mouthFrownRight: [0.01, 0.4],
-  mouthFunnel: [0.01, 0.55],
-  mouthLeft: [0.01, 0.45], mouthRight: [0.01, 0.45],
-  mouthLowerDownLeft: [0.02, 0.55], mouthLowerDownRight: [0.02, 0.55],
-  mouthPressLeft: [0.03, 0.5], mouthPressRight: [0.03, 0.5],
-  mouthPucker: [0.05, 0.75],
-  mouthRollLower: [0.02, 0.55], mouthRollUpper: [0.01, 0.45],
-  mouthShrugLower: [0.08, 0.65], mouthShrugUpper: [0.03, 0.55],
-  mouthSmileLeft: [0.02, 0.8], mouthSmileRight: [0.02, 0.8],
-  mouthStretchLeft: [0.02, 0.4], mouthStretchRight: [0.02, 0.4],
-  mouthUpperUpLeft: [0.02, 0.55], mouthUpperUpRight: [0.02, 0.55],
-  noseSneerLeft: [0.01, 0.4], noseSneerRight: [0.01, 0.4],
+  browDownLeft: [0.12, 0.72], browDownRight: [0.12, 0.72],
+  browInnerUp: [0.03, 0.75],
+  browOuterUpLeft: [0.03, 0.7], browOuterUpRight: [0.03, 0.7],
+  cheekPuff: [0.01, 0.4],
+  cheekSquintLeft: [0.0, 0.25], cheekSquintRight: [0.0, 0.25],
+  eyeBlinkLeft: [0.1, 0.75], eyeBlinkRight: [0.1, 0.75],
+  eyeSquintLeft: [0.36, 0.8], eyeSquintRight: [0.36, 0.8],
+  eyeWideLeft: [0.02, 0.2], eyeWideRight: [0.02, 0.2],
+  jawForward: [0.0, 0.1], jawLeft: [0.002, 0.2], jawRight: [0.002, 0.2],
+  jawOpen: [0.03, 0.55],
+  mouthClose: [0.003, 0.1],
+  mouthDimpleLeft: [0.005, 0.12], mouthDimpleRight: [0.005, 0.12],
+  mouthFrownLeft: [0.003, 0.25], mouthFrownRight: [0.003, 0.25],
+  mouthFunnel: [0.002, 0.15],
+  mouthLeft: [0.002, 0.2], mouthRight: [0.002, 0.2],
+  mouthLowerDownLeft: [0.005, 0.75], mouthLowerDownRight: [0.005, 0.75],
+  mouthPressLeft: [0.03, 0.35], mouthPressRight: [0.03, 0.35],
+  mouthPucker: [0.01, 0.6],
+  mouthRollLower: [0.02, 0.3], mouthRollUpper: [0.035, 0.3],
+  mouthShrugLower: [0.005, 0.35], mouthShrugUpper: [0.006, 0.18],
+  mouthSmileLeft: [0.002, 0.85], mouthSmileRight: [0.002, 0.85],
+  mouthStretchLeft: [0.005, 0.5], mouthStretchRight: [0.005, 0.5],
+  mouthUpperUpLeft: [0.001, 0.65], mouthUpperUpRight: [0.001, 0.65],
+  noseSneerLeft: [0.0, 0.25], noseSneerRight: [0.0, 0.25],
 };
 const GAZE_NAMES = new Set([
   'eyeLookDownLeft', 'eyeLookDownRight', 'eyeLookInLeft', 'eyeLookInRight',
@@ -154,16 +156,17 @@ export class FacsEncoder {
   // Normalizza un blendshape su 0..1 rispetto a riposo e massimo.
   norm(name, v) {
     const r = DEFAULT_RANGE[name] || [0.02, 0.8];
+    const span = r[1] - r[0];
     let rest = r[0];
-    let dz = 0.02;
+    let dz = Math.min(0.02, 0.08 * span);
     let max = r[1];
     const c = this.calibration?.blend?.[name];
     if (c) {
       rest = c.median;
-      dz = 0.015 + 1.5 * c.mad;
-      max = Math.max(r[1], rest + 0.25);
+      dz = Math.min(0.02, 0.08 * span) + 1.5 * c.mad;
+      max = Math.max(r[1], rest + 0.6 * span);
     }
-    return clamp01((v - rest - dz) / Math.max(0.05, max - rest - dz));
+    return clamp01((v - rest - dz) / Math.max(0.03, max - rest - dz));
   }
 
   encode(b, geom) {
@@ -201,7 +204,21 @@ export class FacsEncoder {
     const earWide = ear0
       ? soft01((geom.ear / ear0) - 1.12 - 0.4 * lookUp, 0.3)
       : 0.8 * soft01(geom.ear - 0.38 - 0.15 * lookUp, 0.12);
-    au.AU5 = pair('AU5', Math.max(n.eyeWideLeft, earWide), Math.max(n.eyeWideRight, earWide));
+    // Negli occhi spalancati MediaPipe abbassa eyeSquint sotto il valore a
+    // riposo (molto più affidabile di eyeWide): lo usiamo come indizio di AU5.
+    const squintDeficit = (side) => {
+      const cal = this.calibration?.blend?.[`eyeSquint${side}`]?.median;
+      const rest = cal ?? DEFAULT_RANGE[`eyeSquint${side}`][0];
+      const margin = cal === undefined ? 0.1 : 0.05; // senza calibrazione serve più margine
+      return soft01(rest - (b[`eyeSquint${side}`] ?? rest) - margin, 0.2) * (1 - n[`eyeBlink${side}`]);
+    };
+    // Senza calibrazione un solo occhio "aperto" non basta (asimmetrie
+    // naturali): l'indizio deve comparire su entrambi gli occhi.
+    let defL = squintDeficit('Left'), defR = squintDeficit('Right');
+    if (!this.calibration) defL = defR = Math.min(defL, defR);
+    au.AU5 = pair('AU5',
+      Math.max(n.eyeWideLeft, earWide, 0.9 * defL),
+      Math.max(n.eyeWideRight, earWide, 0.9 * defR));
 
     // AU6 (marcatore del sorriso di Duchenne) vs AU7 (tensore palpebre):
     // cheekSquint di MediaPipe è quasi sempre debole; quando c'è un sorriso lo

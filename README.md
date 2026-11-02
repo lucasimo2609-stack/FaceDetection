@@ -17,8 +17,13 @@ Applicazione web che legge le espressioni del viso dalla **webcam del PC** o dal
 ```bash
 python3 -m http.server 8000
 ```
-Poi apri <http://localhost:8000>, premi **Avvia fotocamera** e poi **🎯 Calibra**
-(3 secondi con il viso rilassato).
+Poi apri <http://localhost:8000> e premi **Avvia fotocamera**.
+
+**Per una buona precisione sul tuo viso** premi **🧑‍🏫 Addestra sul tuo viso**: l'app
+ti chiede di fare, una alla volta, le 8 espressioni (circa 40 secondi in tutto) e
+impara come le fai *tu*. Include anche la calibrazione del viso neutro. Se hai
+poco tempo, almeno **🎯 Calibra** (3 secondi con il viso rilassato). Entrambi
+vengono salvati nel browser solo come numeri e restano per le volte successive.
 
 > Non aprire `index.html` con doppio clic (`file://`): i moduli JavaScript e la
 > fotocamera richiedono un server, anche locale.
@@ -63,16 +68,17 @@ server fornisce solo i file dell'app.
 
 ```
 fotocamera ─► MediaPipe Face Landmarker ─► 478 landmark 3D + 52 blendshape + matrice di posa
-                                                        │
-                                                        ▼
-                                  Codifica FACS: 24 Action Unit (intensità A–E)
-                                                        │
-                       ┌────────────────────────────────┼─────────────────────────────┐
-                       ▼                                ▼                             ▼
-              8 emozioni di base           analisi temporale (ammiccamenti,      posa testa e sguardo
-              (prototipi EMFACS)           PERCLOS, sbadigli, movimento, parlato)
-                       │                                │                             │
-                       └───────────────► 12 stati sottili ◄───────────────────────────┘
+                                │                       │
+                                │                       ▼
+                                │     Codifica FACS: 24 Action Unit (intensità A–E)
+                                │                       │
+                                ▼                       ▼
+     modello appreso (globale + personale)    regole FACS (prototipi EMFACS)
+                                └──────────┬────────────┘
+                                           ▼
+                                  8 emozioni di base ──┐
+     analisi temporale (ammiccamenti, PERCLOS,         ├──► 12 stati sottili
+     sbadigli, movimento, parlato) + posa e sguardo ───┘
 ```
 
 ### 1. Action Unit FACS
@@ -108,7 +114,17 @@ Insieme di AffectNet: le 6 universali di Ekman + disprezzo + neutralità.
 | 🤢 Disgusto | 9 / 10 (+15, 16, 17) |
 | 😏 Disprezzo | 12 + 14 **unilaterali** |
 
-Ogni emozione ha un'intensità 0–1; le probabilità si ottengono con un softmax.
+Le probabilità finali combinano tre fonti (media geometrica pesata):
+
+1. **Regole FACS** qui sopra: affidabili sulle espressioni nette e in posa.
+2. **Modello globale appreso**: regressione logistica sui blendshape, addestrata
+   su ~3.500 volti etichettati (dettagli e numeri in
+   [`tools/model/README.md`](tools/model/README.md)). Pesa 0,7 per
+   neutralità/gioia/sorpresa e 0,2 per le altre emozioni.
+3. **Modello personale** (se hai fatto l'addestramento): un "prototipo" per
+   ciascuna delle tue espressioni; pesa metà del totale e dà anche l'intensità
+   rispetto alla tua espressione piena.
+
 Se due emozioni sono forti insieme viene mostrata l'**emozione composta**
 (gioia + sorpresa = *meraviglia*, paura + disgusto = *orrore*, tristezza +
 sorpresa = *delusione*, ecc.).
@@ -139,8 +155,28 @@ Harrigan & O'Connell 1996 (ansia); Wierwille 1994 (PERCLOS); Du, Tao & Martinez
 
 ---
 
+## Precisione misurata
+
+Sono stati usati due set di prova: circa 3.500 foto prese dal web ed
+etichettate (validazione incrociata con persone diverse fra addestramento e
+test) e 12 espressioni in posa.
+
+| Versione | Foto dal web | Media recall 6 classi | In posa |
+| --- | --- | --- | --- |
+| Prima versione (solo regole) | 49,4% | 30,5% | 10/12 |
+| Attuale, senza addestramento personale | 57,3% | 39,3% | 10/12 |
+
+Le foto dal web sono molto difficili (luce, angolazioni, etichette rumorose):
+anche i migliori sistemi commerciali restano sotto il 70% su dati simili. Per
+l'uso con la propria webcam la differenza la fa l'**addestramento personale**.
+
 ## Miglioramenti aggiunti rispetto alla richiesta
 
+- **Addestramento sul tuo viso** (40 s, guidato) e **modello globale** tarato su
+  dati reali, combinati con le regole FACS.
+- **Intervalli dei blendshape misurati su dati reali**: ad esempio MediaPipe
+  non attiva quasi mai `noseSneer`/`cheekSquint`, e gli occhi spalancati si
+  leggono dal calo di `eyeSquint` più che da `eyeWide`.
 - **Calibrazione del viso neutro**: ogni volto ha un'espressione a riposo diversa
   (sopracciglia alte, angoli della bocca bassi…); 3 secondi di calibrazione la
   sottraggono. Salvata solo come numeri nel browser.
@@ -172,9 +208,8 @@ Harrigan & O'Connell 1996 (ansia); Wierwille 1994 (PERCLOS); Du, Tao & Martinez
 ## Limiti e uso responsabile
 
 - Un'espressione **non è** ciò che una persona prova: il sistema descrive i
-  movimenti del volto e li interpreta con regole della letteratura. Le regole sono
-  state verificate su prototipi sintetici e su alcune foto di esempio, non su un
-  dataset annotato: considera i risultati indicativi.
+  movimenti del volto e li interpreta con regole e modelli statistici. Vedi
+  *Precisione misurata*: considera i risultati indicativi.
 - Precisione ridotta con luce scarsa, volto di profilo, occhiali spessi,
   mascherine, barba folta o mentre si parla.
 - Gli stati lenti (noia, stanchezza, frequenza degli ammiccamenti) richiedono
@@ -194,7 +229,10 @@ css/style.css           stile, tema chiaro/scuro, layout responsive
 js/main.js              avvio, fotocamera, ciclo di analisi, calibrazione, registrazione
 js/landmarker.js        inizializzazione MediaPipe (GPU con ripiego CPU)
 js/facs.js              blendshape → Action Unit FACS, calibrazione
-js/emotions.js          8 emozioni, emozioni composte, valenza/attivazione, micro-espressioni
+js/emotions.js          8 emozioni (regole FACS), emozioni composte, valenza/attivazione, micro-espressioni
+js/features.js          vettore di feature per i modelli appresi
+js/model.js             modello globale e modello personale
+js/model-data.js        pesi del modello globale (generati da tools/model)
 js/states.js            12 stati sottili, attenzione
 js/temporal.js          ammiccamenti, PERCLOS, sbadigli, movimento, sguardo, parlato
 js/headpose.js          posa della testa (yaw/pitch/roll)
@@ -210,12 +248,13 @@ models/                 face_landmarker.task
 scripts/serve_https.py  server HTTPS per provare da iPad/telefono in rete locale
 tests/unit/             test Node (nessuna dipendenza)
 tests/e2e/              test di privacy in Chromium (Playwright)
+tools/model/            estrazione feature e addestramento del modello globale
 ```
 
 ## Test
 
 ```bash
-npm test                                   # 32 test unitari, nessuna dipendenza
+npm test                                   # 39 test unitari, nessuna dipendenza
 python3 -m http.server 8000 &
 node tests/e2e/privacy-smoke.mjs           # richiede Playwright + Chromium
 ```
@@ -223,7 +262,8 @@ node tests/e2e/privacy-smoke.mjs           # richiede Playwright + Chromium
 I test unitari verificano i prototipi FACS di tutte le 8 emozioni, che ciascuno
 dei 12 stati sia raggiungibile nel proprio scenario, la compensazione del sorriso,
 le convenzioni della posa della testa, ammiccamenti/PERCLOS, micro-espressioni e
-la pipeline completa con calibrazione ed esportazione.
+la pipeline completa con calibrazione ed esportazione, il modello globale
+(coerenza dei pesi, casi tipici) e il modello personale con la cattura guidata.
 
 ## Licenze
 

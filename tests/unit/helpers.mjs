@@ -1,13 +1,18 @@
 import { BLENDSHAPE_NAMES } from '../../js/facs.js';
 
-// Blendshape "a riposo" + eventuali valori modificati.
+// Blendshape "a riposo" (mediane dei volti neutri misurate sul dataset di
+// taratura) + eventuali valori modificati.
 export function blendshapes(overrides = {}) {
   const b = {};
-  for (const n of BLENDSHAPE_NAMES) b[n] = 0.02;
-  b.eyeBlinkLeft = b.eyeBlinkRight = 0.08;
-  b.eyeSquintLeft = b.eyeSquintRight = 0.1;
-  b.browInnerUp = 0.05;
-  b.mouthShrugLower = 0.06;
+  for (const n of BLENDSHAPE_NAMES) b[n] = 0.003;
+  b.eyeBlinkLeft = b.eyeBlinkRight = 0.1;
+  b.eyeSquintLeft = b.eyeSquintRight = 0.37;
+  b.browDownLeft = b.browDownRight = 0.1;
+  b.browInnerUp = 0.01;
+  b.mouthPressLeft = b.mouthPressRight = 0.03;
+  b.mouthRollUpper = 0.035;
+  b.mouthRollLower = 0.02;
+  b.jawOpen = 0.03;
   return { ...b, ...overrides };
 }
 

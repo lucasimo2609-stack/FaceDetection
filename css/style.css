@@ -197,6 +197,28 @@ button.recording { background: var(--danger); color: #fff; border-color: transpa
 }
 .calib p { margin: 0 0 0.5rem; }
 
+.train {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  width: min(94%, 460px);
+  padding: 0.55rem 0.8rem;
+  border-radius: 14px;
+  background: rgba(2, 6, 23, 0.72);
+  color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.train-step { display: flex; gap: 0.8rem; align-items: center; }
+.train-emoji { font-size: 2rem; line-height: 1; }
+.train-title { font-weight: 700; }
+.train-text { font-size: 0.8rem; color: #cbd5e1; }
+.train.capturing .train-title { color: #4ade80; }
+.train-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.train-actions button { min-height: 34px; padding: 0.3rem 0.8rem; color: #f8fafc; background: rgba(148, 163, 184, 0.2); border-color: rgba(148, 163, 184, 0.35); }
+
 .toast {
   position: absolute;
   top: 12px;

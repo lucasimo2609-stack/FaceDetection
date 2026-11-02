@@ -54,13 +54,24 @@
             <p id="calib-text">Rilassa il viso…</p>
             <span class="track wide"><span id="calib-bar" class="fill"></span></span>
           </div>
+          <div id="train" class="train" hidden>
+            <div class="train-step"><span id="train-emoji" class="train-emoji">😐</span>
+              <div><div id="train-title" class="train-title">Passo 1/8</div>
+                <div id="train-text" class="train-text"></div></div></div>
+            <span class="track wide"><span id="train-bar" class="fill"></span></span>
+            <div class="train-actions">
+              <button id="btn-train-skip" type="button">Salta</button>
+              <button id="btn-train-cancel" type="button">Annulla</button>
+            </div>
+          </div>
           <div id="toast" class="toast" hidden></div>
         </div>
         <div class="controls">
           <button id="btn-start" class="primary" type="button">Avvia fotocamera</button>
           <button id="btn-switch" type="button" disabled title="Fotocamera frontale / posteriore">🔄 Cambia</button>
           <select id="sel-camera" aria-label="Fotocamera" hidden></select>
-          <button id="btn-calibrate" type="button" disabled>🎯 Calibra</button>
+          <button id="btn-calibrate" type="button" disabled title="3 secondi con il viso rilassato">🎯 Calibra</button>
+          <button id="btn-train" type="button" disabled title="Registra le tue 8 espressioni (circa 40 secondi)">🧑‍🏫 Addestra sul tuo viso</button>
           <button id="btn-record" type="button" disabled>● Registra</button>
           <label class="field">Sovrapposizione
             <select id="sel-overlay">
@@ -122,8 +133,10 @@
           <div id="hero-smile" class="pill" hidden></div>
         </div>
         <div id="hero-hint" class="hero-hint">
-          Per misure più precise calibra con il viso rilassato:
-          <button id="btn-calib-hint" type="button" class="link">calibra ora</button>
+          <span id="hero-hint-text">Per riconoscere meglio le tue espressioni:</span>
+          <button id="btn-calib-hint" type="button" class="link">calibra (3 s)</button>
+          <span id="hero-hint-or">oppure</span>
+          <button id="btn-train-hint" type="button" class="link">addestra sul tuo viso (40 s)</button>
         </div>
       </section>
 
@@ -159,6 +172,10 @@
           <span id="calib-status" class="muted small"></span>
           <button id="btn-calib-reset" type="button" class="link" hidden>rimuovi calibrazione</button>
         </div>
+        <div class="calib-status">
+          <span id="personal-status" class="muted small"></span>
+          <button id="btn-personal-reset" type="button" class="link" hidden>elimina addestramento</button>
+        </div>
       </details>
     </div>
   </main>
@@ -183,20 +200,21 @@
     <ol class="steps">
       <li><strong>Rilevamento</strong> — MediaPipe Face Landmarker individua 478 punti del volto e calcola 52 coefficienti di espressione (blendshape) e la posa 3D della testa.</li>
       <li><strong>Codifica FACS</strong> — i coefficienti vengono convertiti in 24 Action Unit del Facial Action Coding System (Ekman &amp; Friesen), con intensità A–E, correggendo gli effetti collaterali tipici (es. il sorriso ampio che abbassa le sopracciglia).</li>
-      <li><strong>8 emozioni di base</strong> — neutralità, gioia, tristezza, sorpresa, paura, rabbia, disgusto, disprezzo, dalle combinazioni di AU di EMFACS. Se due emozioni sono presenti insieme viene indicata l'emozione composta (es. sorpresa + gioia = meraviglia).</li>
+      <li><strong>8 emozioni di base</strong> — neutralità, gioia, tristezza, sorpresa, paura, rabbia, disgusto, disprezzo: combinano le regole FACS (EMFACS), un modello statistico addestrato su migliaia di volti e, se l'hai fatto, il tuo addestramento personale. Se due emozioni sono presenti insieme viene indicata l'emozione composta (es. sorpresa + gioia = meraviglia).</li>
       <li><strong>12 stati sottili</strong> — concentrazione, interesse, confusione, scetticismo, noia, stanchezza, ansia, frustrazione, imbarazzo, sorriso di cortesia, riflessione, orgoglio: combinano AU deboli, posa della testa, sguardo e dinamiche nel tempo (frequenza degli ammiccamenti, PERCLOS, sbadigli, movimento, parlato).</li>
     </ol>
     <h3>Consigli</h3>
     <ul>
       <li>Usa una luce frontale e uniforme, con il viso intero nell'inquadratura.</li>
-      <li><strong>Calibra</strong> all'inizio: 3 secondi con il viso rilassato. Ogni volto ha una "espressione a riposo" diversa; la calibrazione la sottrae e migliora molto la precisione.</li>
+      <li><strong>Addestra sul tuo viso</strong> (circa 40 secondi): fai una alla volta le 8 espressioni quando richiesto. L'app impara come le fai tu ed è il modo più efficace per ridurre gli errori. Include la calibrazione.</li>
+      <li>In alternativa almeno <strong>Calibra</strong>: 3 secondi con il viso rilassato. Ogni volto ha una "espressione a riposo" diversa; la calibrazione la sottrae.</li>
       <li>Gli stati lenti (noia, stanchezza, ammiccamenti) hanno bisogno di 15–60 secondi di osservazione.</li>
     </ul>
     <h3>Privacy</h3>
     <ul>
       <li>L'analisi gira interamente nel browser (WebAssembly/WebGL). Nessun fotogramma viene salvato, registrato o trasmesso.</li>
       <li>Libreria e modello sono serviti da questo stesso sito; la Content-Security-Policy blocca ogni connessione verso altri server e l'indicatore in alto conta eventuali tentativi.</li>
-      <li>Viene memorizzata in locale solo la calibrazione (numeri) e le preferenze. La registrazione della sessione contiene solo numeri e resta in memoria finché non la scarichi.</li>
+      <li>Vengono memorizzati in locale solo la calibrazione, l'addestramento personale (vettori di numeri, nessuna immagine) e le preferenze. La registrazione della sessione contiene solo numeri e resta in memoria finché non la scarichi.</li>
     </ul>
     <h3>Limiti</h3>
     <ul>

@@ -9,9 +9,36 @@ import {
   DominantTracker, MicroExpressionDetector, EMOTION_IDS,
 } from './emotions.js';
 import { scoreStates, attentionLevel } from './states.js';
-import { EmaVector, clamp01, soft } from './util.js';
+import { featureVector } from './features.js';
+import { predictGlobal, featureOffset, combineProbs, PersonalModel } from './model.js';
+import { EmaVector, emaAlpha, clamp01, soft } from './util.js';
 
 const CAL_KEY = 'facs-calibration-v1';
+const PERSONAL_KEY = 'facs-personal-v1';
+
+// Pesi della combinazione (media geometrica delle probabilità), per emozione.
+// Il modello appreso è affidabile dove aveva molti dati puliti (neutralità,
+// gioia, sorpresa); per le altre emozioni, poco rappresentate o con etichette
+// rumorose, pesano di più le regole FACS. Scelti valutando sia foto "dal vivo"
+// sia espressioni in posa (vedi tools/model/README.md).
+export const GLOBAL_WEIGHT = {
+  neutral: 0.7, joy: 0.7, surprise: 0.7,
+  sadness: 0.2, fear: 0.2, anger: 0.2, disgust: 0.2, contempt: 0.2,
+};
+const RULE_WEIGHT = Object.fromEntries(Object.entries(GLOBAL_WEIGHT).map(([k, v]) => [k, 1 - v]));
+// Con il modello personale questo vale metà; il resto si divide come sopra.
+const PERSONAL_SHARE = 0.5;
+const scaleW = (w, f) => Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v * f]));
+
+class ArrayEma {
+  constructor() { this.value = null; }
+  update(arr, dt, tau) {
+    if (!this.value || this.value.length !== arr.length) { this.value = arr.slice(); return this.value; }
+    const a = emaAlpha(dt, tau);
+    for (let i = 0; i < arr.length; i++) this.value[i] += a * (arr[i] - this.value[i]);
+    return this.value;
+  }
+}
 
 export class Analyzer {
   constructor({ storage = null } = {}) {
@@ -25,7 +52,10 @@ export class Analyzer {
     this.lastT = null;
     this.calibration = null;
     this.calibrating = null;
+    this.capturing = null;
+    this.personal = null;
     this.loadCalibration();
+    this.loadPersonal();
   }
 
   resetFilters() {
@@ -34,6 +64,8 @@ export class Analyzer {
     this.emoSmooth = new EmaVector(250);
     this.stateSmooth = new EmaVector(1200);
     this.poseSmooth = new EmaVector(120);
+    this.featSmooth = new ArrayEma();
+    this.probSmooth = new EmaVector(250);
   }
 
   loadCalibration() {
@@ -55,6 +87,65 @@ export class Analyzer {
     this.calibration = null;
     this.encoder.setCalibration(null);
     try { this.storage?.removeItem(CAL_KEY); } catch { /* ignora */ }
+  }
+
+  // Costruisce la calibrazione (viso neutro) da campioni {b, geom, pose}.
+  calibrateFrom(samples) {
+    const cal = buildCalibration(samples);
+    cal.featOffset = featureOffset(samples.map((s) => featureVector(s.b, s.geom)));
+    this.applyCalibration(cal);
+    this.temporal.reset();
+    this.resetFilters();
+    return cal;
+  }
+
+  // ---------- Modello personale ----------
+  loadPersonal() {
+    try {
+      const raw = this.storage?.getItem(PERSONAL_KEY);
+      if (raw) this.personal = new PersonalModel(JSON.parse(raw));
+    } catch { this.personal = null; }
+  }
+
+  setPersonal(model, persist = true) {
+    this.personal = model;
+    if (persist) {
+      try { this.storage?.setItem(PERSONAL_KEY, JSON.stringify(model.data)); } catch { /* ignora */ }
+    }
+  }
+
+  clearPersonal() {
+    this.personal = null;
+    try { this.storage?.removeItem(PERSONAL_KEY); } catch { /* ignora */ }
+  }
+
+  // Registra per `durationMs` i fotogrammi con volto: {b, geom, pose, x}.
+  // Usato dall'addestramento guidato (un'espressione alla volta).
+  capture(durationMs = 2500) {
+    return new Promise((resolve) => {
+      this.capturing = { samples: [], start: null, durationMs, resolve };
+    });
+  }
+
+  captureProgress(t) {
+    const c = this.capturing;
+    if (!c || c.start === null) return 0;
+    return clamp01((t - c.start) / c.durationMs);
+  }
+
+  cancelCapture() {
+    if (this.capturing) this.capturing.resolve(null);
+    this.capturing = null;
+  }
+
+  feedCapture(t, sample) {
+    const c = this.capturing;
+    if (c.start === null) c.start = t;
+    if (sample) c.samples.push(sample);
+    if (t - c.start >= c.durationMs) {
+      this.capturing = null;
+      c.resolve(c.samples);
+    }
   }
 
   // Avvia la raccolta di campioni con viso neutro. Restituisce una Promise
@@ -88,11 +179,7 @@ export class Analyzer {
         c.reject(new Error('Volto non rilevato a sufficienza durante la calibrazione'));
         return;
       }
-      const cal = buildCalibration(c.samples);
-      this.applyCalibration(cal);
-      this.temporal.reset();
-      this.resetFilters();
-      c.resolve(cal);
+      c.resolve(this.calibrateFrom(c.samples));
     }
   }
 
@@ -105,6 +192,7 @@ export class Analyzer {
     if (!result?.faceLandmarks?.length) {
       this.temporal.noFace(t);
       if (this.calibrating) this.feedCalibration(t, null);
+      if (this.capturing) this.feedCapture(t, null);
       return { face: false, t };
     }
 
@@ -113,7 +201,9 @@ export class Analyzer {
     const geom = geometry(lm, width, height);
     const rawPose = headPose(result, width, height);
 
+    const xRaw = featureVector(b, geom);
     if (this.calibrating) this.feedCalibration(t, { b, geom, pose: rawPose });
+    if (this.capturing) this.feedCapture(t, { b, geom, pose: rawPose, x: xRaw });
 
     const p0 = this.calibration?.pose || { yaw: 0, pitch: 0, roll: 0 };
     const pose = this.poseSmooth.update({
@@ -144,9 +234,40 @@ export class Analyzer {
     const smoothAU = this.auSmooth.update(facs.au, dt, 140 * k);
     const ctx = { talking: T.talking };
     const fastEmo = scoreEmotions({ ...facs, au: fastAU }, ctx);
-    const emoRaw = scoreEmotions({ ...facs, au: smoothAU }, ctx);
-    const emotions = this.emoSmooth.update(emoRaw, dt, 250 * k);
-    const probs = emotionProbabilities(emotions);
+    const ruleScores = scoreEmotions({ ...facs, au: smoothAU }, ctx);
+
+    // Tre fonti: regole FACS, modello globale appreso, modello personale.
+    const xs = this.featSmooth.update(xRaw, dt, 140 * k);
+    const off = this.calibration?.featOffset;
+    const pGlobal = predictGlobal(off ? xs.map((v, j) => v - off[j]) : xs);
+    const pRules = emotionProbabilities(ruleScores);
+    let pPersonal = null, personalIntensity = null;
+    if (this.personal) {
+      const pr = this.personal.predict(xs);
+      pPersonal = this.personal.fullProbs(pr.probs, pGlobal);
+      personalIntensity = pr.intensity;
+    }
+    const mixed = pPersonal
+      ? combineProbs([
+        { probs: pPersonal, weight: PERSONAL_SHARE },
+        { probs: pGlobal, weight: scaleW(GLOBAL_WEIGHT, 1 - PERSONAL_SHARE) },
+        { probs: pRules, weight: scaleW(RULE_WEIGHT, 1 - PERSONAL_SHARE) },
+      ])
+      : combineProbs([{ probs: pGlobal, weight: GLOBAL_WEIGHT }, { probs: pRules, weight: RULE_WEIGHT }]);
+    const probs = this.probSmooth.update(mixed, dt, 250 * k);
+
+    // Intensità (0..1) per barre, emozioni composte e stati: unisce la forza
+    // delle AU (regole), la probabilità e, se c'è, quanto l'espressione si
+    // avvicina a quella registrata dalla persona.
+    const intensityRaw = { neutral: probs.neutral };
+    for (const id of EMOTION_IDS) {
+      if (id === 'neutral') continue;
+      const pi = personalIntensity?.[id];
+      intensityRaw[id] = pi === undefined
+        ? clamp01(0.5 * ruleScores[id] + 0.5 * probs[id])
+        : clamp01(0.3 * ruleScores[id] + 0.3 * probs[id] + 0.4 * pi * Math.sqrt(probs[id]));
+    }
+    const emotions = this.emoSmooth.update(intensityRaw, dt, 250 * k);
     const dominant = this.dominant.update(t, probs);
     const blend = detectBlend(emotions);
 
@@ -172,6 +293,7 @@ export class Analyzer {
       geom,
       emotions,
       probs,
+      sources: { rules: pRules, global: pGlobal, personal: pPersonal },
       dominant,
       blend,
       micro,
@@ -182,6 +304,7 @@ export class Analyzer {
       duchenne,
       temporal: T,
       calibrated: Boolean(this.calibration),
+      personal: Boolean(this.personal),
     };
   }
 }

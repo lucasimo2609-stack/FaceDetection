@@ -55,6 +55,10 @@ export function scoreEmotions(f, ctx = {}) {
   // AU4 + labbra serrate = rabbia, non tristezza.
   sadness *= 1 - 0.6 * soft(Math.max(a.AU23, a.AU24), 0.5) * soft(a.AU4, 0.3);
 
+  // Bocca "a smorfia" (denti scoperti, labbra stirate) senza AU6: tipica della
+  // paura; MediaPipe la legge come sorriso + labbro sollevato.
+  const grimace = 0.7 * gmean(a.AU16, Math.max(a.AU10, AU20)) * (1 - soft(a.AU6, 0.4));
+
   // Sorpresa — AU1 + AU2 + AU5 + AU26. Le sole sopracciglia alzate
   // ("eyebrow flash") sono più spesso interesse/enfasi che sorpresa.
   const browUp = 0.6 * Math.min(a.AU1, a.AU2) + 0.4 * (a.AU1 + a.AU2) / 2;
@@ -66,12 +70,12 @@ export function scoreEmotions(f, ctx = {}) {
   surprise *= 1 - 0.4 * soft(AU20, 0.45);
   surprise *= 1 - 0.3 * soft(a.AU9, 0.4);
   surprise *= 1 - 0.6 * soft(Math.max(a.AU7, a.AU43), 0.5); // occhi stretti: non è sorpresa
+  surprise *= 1 - 0.5 * soft(grimace, 0.35);
 
   // Paura — AU1 + AU2 + AU4 + AU5 + AU7 + AU20 + AU26. MediaPipe tende a
   // leggere la bocca stirata della paura come sorriso + labbro sollevato:
   // per questo la "smorfia" a denti scoperti senza AU6 conta come AU20.
   const fearBrow = Math.max(gmean(Math.max(a.AU1, 0.8 * a.AU2), a.AU4), 0.8 * soft(a.AU1, 0.5));
-  const grimace = 0.7 * gmean(a.AU16, Math.max(a.AU10, AU20)) * (1 - soft(a.AU6, 0.4));
   const fearMouth = Math.max(AU20, grimace);
   let fear = clamp01(0.35 * soft(fearBrow, 0.45) + 0.3 * soft(a.AU5, 0.4) + 0.25 * soft(fearMouth, 0.4) +
     0.1 * soft(mouthOpen, 0.5));
@@ -87,8 +91,13 @@ export function scoreEmotions(f, ctx = {}) {
   const lips = Math.max(a.AU23, a.AU24);
   let anger = clamp01(0.4 * soft(a.AU4, 0.5) + 0.15 * soft(a.AU5, 0.4) + 0.15 * soft(a.AU7, 0.5) +
     0.2 * soft(lips, 0.5) + 0.1 * soft(Math.max(a.AU17, a.AU10), 0.5));
-  anger *= soft(a.AU4, 0.25);
-  anger *= 0.4 + 0.6 * soft(Math.max(a.AU5, a.AU7, lips), 0.3);
+  // Sopracciglia basse + occhi stretti da soli sono spesso un viso "serio" a
+  // riposo: serve un secondo indizio (labbra serrate, occhi sgranati, bocca
+  // aperta come nell'urlo).
+  const shout = gmean(soft(a.AU4, 0.4), soft(Math.max(a.AU26, a.AU16), 0.4));
+  anger *= soft(a.AU4 - 0.1, 0.3);
+  // Un AU4 molto marcato (aggrottare con forza) basta anche da solo.
+  anger *= 0.25 + 0.75 * Math.max(soft(Math.max(a.AU5, lips, shout, 0.5 * a.AU7, 0.6 * a.AU10), 0.35), soft(a.AU4 - 0.45, 0.35));
   anger *= 1 - 0.7 * soft(a.AU1, 0.5);
   anger *= 1 - 0.6 * soft(a.AU12, 0.5);
 
@@ -105,8 +114,9 @@ export function scoreEmotions(f, ctx = {}) {
   disgust *= 1 - 0.6 * soft(a.AU12, 0.6);
 
   // Disprezzo — sollevamento/tensione unilaterale dell'angolo della bocca.
-  const asym = Math.max(f.asym.AU12, f.asym.AU14, 0.7 * f.asym.AU10);
-  let contempt = soft(asym - 0.08, 0.3) *
+  // L'asimmetria delle fossette (AU14) è rumorosa: pesa la metà del sorriso.
+  const asym = Math.max(f.asym.AU12, 0.5 * f.asym.AU14, 0.6 * f.asym.AU10);
+  let contempt = soft(asym - 0.15, 0.3) *
     (0.6 + 0.4 * soft(Math.max(a.AU14, Math.max(smileL, smileR)), 0.4));
   contempt = Math.max(contempt, 0.45 * soft(a.AU14, 0.6) * (1 - soft(a.AU12, 0.4)));
   contempt *= 1 - 0.6 * soft(a.AU6, 0.4);

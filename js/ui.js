@@ -51,6 +51,7 @@ export class Panels {
     this.hero = {
       card: $('#hero'), emoji: $('#hero-emoji'), label: $('#hero-label'), conf: $('#hero-conf'),
       blend: $('#hero-blend'), smile: $('#hero-smile'), hint: $('#hero-hint'),
+      calibBtn: $('#btn-calib-hint'), or: $('#hero-hint-or'),
     };
     this.microT0 = null;
   }
@@ -106,7 +107,8 @@ export class Panels {
     this.hero.label.textContent = dom.label;
     this.hero.card.style.setProperty('--hero', dom.color);
     this.hero.conf.textContent = `Probabilità ${pct(r.probs[r.dominant])}` +
-      (r.dominant !== 'neutral' ? ` · intensità ${pct(r.emotions[r.dominant])}` : '');
+      (r.dominant !== 'neutral' ? ` · intensità ${pct(r.emotions[r.dominant])}` : '') +
+      (r.personal ? ' · personalizzato' : '');
     this.hero.blend.textContent = r.blend ? `Emozione composta: ${r.blend.name}` : '';
     if (r.duchenne !== null) {
       this.hero.smile.hidden = false;
@@ -116,7 +118,10 @@ export class Panels {
     } else {
       this.hero.smile.hidden = true;
     }
-    this.hero.hint.hidden = r.calibrated;
+    // Suggerimento: calibrare e/o addestrare il modello personale.
+    this.hero.hint.hidden = r.personal;
+    this.hero.calibBtn.hidden = r.calibrated;
+    this.hero.or.hidden = r.calibrated;
 
     for (const e of EMOTIONS) {
       const row = this.emoRows[e.id];
