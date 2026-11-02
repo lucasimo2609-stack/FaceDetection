@@ -1,0 +1,465 @@
+// Avvio dell'applicazione: collega fotocamera, MediaPipe, analisi e interfaccia.
+// Tutto avviene nel browser: i fotogrammi non vengono salvati né trasmessi.
+
+import { createLandmarker } from './landmarker.js';
+import { Camera } from './camera.js';
+import { Analyzer } from './analyzer.js';
+import { Overlay } from './overlay.js';
+import { Panels } from './ui.js';
+import { Timeline, Circumplex } from './charts.js';
+import { SessionRecorder, downloadText } from './session.js';
+import { EMOTIONS, EMOTION_BY_ID } from './emotions.js';
+import { STATES } from './states.js';
+import { startPrivacyMonitor } from './privacy.js';
+
+const $ = (sel) => document.querySelector(sel);
+
+const video = $('#video');
+const stage = $('#stage');
+const stageMsg = $('#stage-msg');
+const stageText = $('#stage-text');
+const btnStart = $('#btn-start');
+const btnStartBig = $('#btn-start-big');
+const btnSwitch = $('#btn-switch');
+const selCamera = $('#sel-camera');
+const btnCalibrate = $('#btn-calibrate');
+const selOverlay = $('#sel-overlay');
+const selReactivity = $('#sel-reactivity');
+const chkHide = $('#chk-hide-video');
+const btnRecord = $('#btn-record');
+const perf = $('#perf');
+const calib = $('#calib');
+const calibText = $('#calib-text');
+const calibBar = $('#calib-bar');
+
+let storage = null;
+try { storage = window.localStorage; } catch { storage = null; }
+
+const camera = new Camera(video);
+const analyzer = new Analyzer({ storage });
+const overlay = new Overlay($('#overlay'));
+const panels = new Panels();
+const timeline = new Timeline($('#timeline'));
+const circumplex = new Circumplex($('#circumplex'));
+const recorder = new SessionRecorder();
+
+let landmarker = null;
+let delegate = '';
+let loadingPromise = null;
+let running = false;
+let lastVideoTime = -1;
+let lastUi = 0;
+let lastChart = 0;
+let fps = 0, inferMs = 0, lastFrameT = 0;
+let wakeLock = null;
+let lastResult = null;
+
+// ---------- Preferenze (solo impostazioni, nessun dato personale) ----------
+const PREF_KEY = 'facs-prefs-v1';
+function loadPrefs() {
+  try { return JSON.parse(storage?.getItem(PREF_KEY) || '{}'); } catch { return {}; }
+}
+function savePrefs() {
+  try {
+    storage?.setItem(PREF_KEY, JSON.stringify({
+      overlay: selOverlay.value, reactivity: selReactivity.value, hide: chkHide.checked,
+    }));
+  } catch { /* ignora */ }
+}
+const prefs = loadPrefs();
+if (prefs.overlay) selOverlay.value = prefs.overlay;
+if (prefs.reactivity) selReactivity.value = prefs.reactivity;
+chkHide.checked = Boolean(prefs.hide);
+applySettings();
+
+function applySettings() {
+  overlay.mode = selOverlay.value;
+  overlay.hideVideo = chkHide.checked;
+  stage.classList.toggle('hide-video', chkHide.checked);
+  analyzer.reactivity = Number(selReactivity.value) || 1;
+}
+selOverlay.addEventListener('change', () => { applySettings(); savePrefs(); });
+selReactivity.addEventListener('change', () => { applySettings(); savePrefs(); });
+chkHide.addEventListener('change', () => { applySettings(); savePrefs(); });
+
+// ---------- Legenda del grafico temporale ----------
+const legend = $('#timeline-legend');
+for (const e of EMOTIONS) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'legend-item';
+  b.textContent = `${e.emoji} ${e.label}`;
+  b.style.setProperty('--c', e.color);
+  b.classList.toggle('off', timeline.hidden.has(e.id));
+  b.addEventListener('click', () => {
+    timeline.toggle(e.id);
+    b.classList.toggle('off', timeline.hidden.has(e.id));
+  });
+  legend.append(b);
+}
+
+// ---------- Caricamento del modello ----------
+function setStageMessage(text, { showButton = false, error = false } = {}) {
+  stageMsg.hidden = !text && !showButton;
+  stageText.textContent = text || '';
+  stageMsg.classList.toggle('error', error);
+  btnStartBig.hidden = !showButton;
+}
+
+function loadModel() {
+  if (!loadingPromise) {
+    loadingPromise = createLandmarker({ onStatus: (s) => { if (!running) setStageMessage(s); } })
+      .then((res) => {
+        landmarker = res.landmarker;
+        delegate = res.delegate;
+        if (!running) setStageMessage('Modello pronto. Avvia la fotocamera per iniziare.', { showButton: true });
+        return res;
+      })
+      .catch((err) => {
+        loadingPromise = null;
+        console.error(err);
+        setStageMessage(`Impossibile caricare il modello: ${err.message || err}`, { showButton: true, error: true });
+        throw err;
+      });
+  }
+  return loadingPromise;
+}
+
+// ---------- Fotocamera ----------
+async function startCamera(opts = {}) {
+  btnStart.disabled = true;
+  btnStartBig.disabled = true;
+  try {
+    setStageMessage('Richiesta accesso alla fotocamera…');
+    await camera.start(opts);
+    await loadModel();
+    setStageMessage('');
+    onVideoResize();
+    running = true;
+    lastVideoTime = -1;
+    btnStart.textContent = 'Ferma';
+    btnStart.classList.remove('primary');
+    btnSwitch.disabled = false;
+    btnCalibrate.disabled = false;
+    btnRecord.disabled = false;
+    selCamera.disabled = false;
+    await refreshDeviceList();
+    requestWakeLock();
+    schedule();
+  } catch (err) {
+    console.error(err);
+    camera.stop();
+    running = false;
+    const msg = err?.name === 'NotAllowedError'
+      ? 'Accesso alla fotocamera negato. Consentilo dalle impostazioni del browser e riprova.'
+      : err?.name === 'NotFoundError'
+        ? 'Nessuna fotocamera trovata.'
+        : (err?.message || String(err));
+    setStageMessage(msg, { showButton: true, error: true });
+  } finally {
+    btnStart.disabled = false;
+    btnStartBig.disabled = false;
+  }
+}
+
+function stopCamera() {
+  running = false;
+  camera.stop();
+  overlay.clear();
+  releaseWakeLock();
+  if (recorder.recording) stopRecording();
+  btnStart.textContent = 'Avvia fotocamera';
+  btnStart.classList.add('primary');
+  btnSwitch.disabled = true;
+  btnCalibrate.disabled = true;
+  btnRecord.disabled = true;
+  selCamera.disabled = true;
+  setStageMessage('Fotocamera spenta.', { showButton: true });
+  perf.textContent = delegate ? `${delegate} · in pausa` : '—';
+}
+
+async function refreshDeviceList() {
+  const devices = await camera.listDevices();
+  selCamera.innerHTML = '';
+  devices.forEach((d, i) => {
+    const o = document.createElement('option');
+    o.value = d.deviceId;
+    o.textContent = d.label || `Fotocamera ${i + 1}`;
+    if (d.deviceId === camera.deviceId) o.selected = true;
+    selCamera.append(o);
+  });
+  selCamera.hidden = devices.length < 2;
+}
+
+function onVideoResize() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (!w || !h) return;
+  stage.style.aspectRatio = `${w} / ${h}`;
+  overlay.resize(w, h);
+  overlay.mirror = camera.shouldMirror;
+  video.classList.toggle('mirror', camera.shouldMirror);
+}
+video.addEventListener('resize', onVideoResize);
+
+btnStart.addEventListener('click', () => (running ? stopCamera() : startCamera()));
+btnStartBig.addEventListener('click', () => startCamera());
+btnSwitch.addEventListener('click', async () => {
+  running = false;
+  try {
+    await camera.switchFacing();
+    onVideoResize();
+    running = true;
+    lastVideoTime = -1;
+    analyzer.temporal.reset();
+    await refreshDeviceList();
+    schedule();
+  } catch (err) {
+    setStageMessage(`Impossibile cambiare fotocamera: ${err.message}`, { showButton: true, error: true });
+  }
+});
+selCamera.addEventListener('change', async () => {
+  running = false;
+  try {
+    await camera.start({ deviceId: selCamera.value });
+    onVideoResize();
+    running = true;
+    lastVideoTime = -1;
+    analyzer.temporal.reset();
+    schedule();
+  } catch (err) {
+    setStageMessage(`Impossibile usare questa fotocamera: ${err.message}`, { showButton: true, error: true });
+  }
+});
+
+// ---------- Ciclo di analisi ----------
+let rafId = 0;
+function schedule() {
+  if (!rafId) rafId = requestAnimationFrame(frame);
+}
+function frame() {
+  rafId = 0;
+  if (!running) return;
+  processFrame();
+  schedule();
+}
+
+// Alcuni dispositivi creano il modello su GPU ma poi falliscono durante
+// l'inferenza: dopo alcuni errori consecutivi si ripiega sulla CPU.
+let detectErrors = 0;
+let fallingBack = false;
+function fallbackToCpu() {
+  if (fallingBack || delegate !== 'GPU') return;
+  fallingBack = true;
+  const old = landmarker;
+  landmarker = null;
+  try { old?.close(); } catch { /* ignora */ }
+  createLandmarker({ preferGpu: false })
+    .then((res) => {
+      landmarker = res.landmarker;
+      delegate = res.delegate;
+      loadingPromise = Promise.resolve(res);
+      detectErrors = 0;
+      toast('GPU non disponibile: analisi su CPU');
+    })
+    .catch((err) => setStageMessage(`Errore del modello: ${err.message}`, { showButton: true, error: true }))
+    .finally(() => { fallingBack = false; });
+}
+
+function processFrame() {
+  const now = performance.now();
+  if (landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    let result = null;
+    const t0 = performance.now();
+    try {
+      result = landmarker.detectForVideo(video, now);
+      detectErrors = 0;
+    } catch (err) {
+      console.error(err);
+      if (++detectErrors >= 5) fallbackToCpu();
+    }
+    const t1 = performance.now();
+    inferMs = inferMs ? inferMs * 0.9 + (t1 - t0) * 0.1 : t1 - t0;
+    if (lastFrameT) fps = fps ? fps * 0.9 + (1000 / (now - lastFrameT)) * 0.1 : 1000 / (now - lastFrameT);
+    lastFrameT = now;
+
+    const r = analyzer.update(result, now, video.videoWidth, video.videoHeight);
+    lastResult = r;
+    overlay.draw(r, r.face ? EMOTION_BY_ID[r.dominant].color : undefined);
+    recorder.push(r);
+    if (r.face && r.micro?.length) panels.addMicro(r.micro, now);
+    if (r.face && r.temporal.events.length) handleEvents(r.temporal.events);
+
+    if (analyzer.calibrating || calib.dataset.active === '1') updateCalibrationUi(now, r);
+
+    if (now - lastUi > 100) {
+      lastUi = now;
+      panels.update(r);
+      perf.textContent = `${delegate} · ${Math.round(fps)} fps · ${inferMs.toFixed(0)} ms`;
+      if (recorder.recording) btnRecord.textContent = `■ Stop ${formatTime(recorder.elapsed(now))}`;
+    }
+    if (now - lastChart > 200) {
+      lastChart = now;
+      timeline.push(now, r.face ? r.probs : null);
+      if (r.face) circumplex.push(now, r.valence, r.arousal);
+      timeline.draw(now);
+      circumplex.draw();
+    }
+  }
+}
+
+function handleEvents(events) {
+  for (const ev of events) {
+    if (ev.type === 'yawn') toast('🥱 Sbadiglio rilevato');
+    if (ev.type === 'long') toast(`😴 Occhi chiusi per ${(ev.duration / 1000).toFixed(1)} s`);
+  }
+}
+
+let toastTimer = null;
+function toast(text) {
+  const t = $('#toast');
+  t.textContent = text;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, 2500);
+}
+
+function formatTime(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
+
+// ---------- Calibrazione con viso neutro ----------
+function updateCalibrationUi(now, r) {
+  if (!analyzer.calibrating) return;
+  const p = analyzer.calibrationProgress(now);
+  calibBar.style.transform = `scaleX(${p})`;
+  calibText.textContent = r.face ? 'Viso rilassato, sguardo verso lo schermo…' : 'Volto non visibile!';
+}
+
+async function runCalibration() {
+  if (!running) {
+    toast('Avvia prima la fotocamera');
+    return;
+  }
+  btnCalibrate.disabled = true;
+  calib.hidden = false;
+  calib.dataset.active = '1';
+  calibBar.style.transform = 'scaleX(0)';
+  for (const n of [3, 2, 1]) {
+    calibText.textContent = `Rilassa il viso, guarda lo schermo… ${n}`;
+    await new Promise((res) => setTimeout(res, 800));
+  }
+  try {
+    await analyzer.startCalibration(3000);
+    toast('✅ Calibrazione completata');
+    updateCalibrationStatus();
+  } catch (err) {
+    toast(`⚠️ ${err.message}`);
+  } finally {
+    calib.hidden = true;
+    calib.dataset.active = '0';
+    btnCalibrate.disabled = false;
+  }
+}
+btnCalibrate.addEventListener('click', runCalibration);
+$('#btn-calib-hint').addEventListener('click', runCalibration);
+$('#btn-calib-reset').addEventListener('click', () => {
+  analyzer.clearCalibration();
+  updateCalibrationStatus();
+  toast('Calibrazione rimossa');
+});
+
+function updateCalibrationStatus() {
+  const s = $('#calib-status');
+  if (analyzer.calibration) {
+    const d = new Date(analyzer.calibration.created);
+    s.textContent = `Calibrato il ${d.toLocaleDateString('it-IT')} alle ${d.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`;
+    $('#btn-calib-reset').hidden = false;
+  } else {
+    s.textContent = 'Non calibrato: valori di riposo generici.';
+    $('#btn-calib-reset').hidden = true;
+  }
+}
+updateCalibrationStatus();
+
+// ---------- Registrazione della sessione (solo numeri) ----------
+function startRecording() {
+  recorder.begin(performance.now());
+  btnRecord.classList.add('recording');
+  btnRecord.textContent = '■ Stop 00:00';
+}
+
+function stopRecording() {
+  recorder.end();
+  btnRecord.classList.remove('recording');
+  btnRecord.textContent = '● Registra';
+  showSummary();
+}
+btnRecord.addEventListener('click', () => (recorder.recording ? stopRecording() : startRecording()));
+
+function showSummary() {
+  const s = recorder.summary();
+  const box = $('#summary-body');
+  box.innerHTML = '';
+  const add = (label, value) => {
+    const dt = document.createElement('dt'); dt.textContent = label;
+    const dd = document.createElement('dd'); dd.textContent = value;
+    box.append(dt, dd);
+  };
+  add('Durata', formatTime(s.durationS * 1000));
+  add('Volto presente', `${Math.round(s.facePresence * 100)}% del tempo`);
+  const dom = EMOTIONS.map((e) => [e, s.dominantShare[e.id]]).filter(([, v]) => v > 0.01).sort((a, b) => b[1] - a[1]);
+  add('Emozioni prevalenti', dom.length ? dom.map(([e, v]) => `${e.emoji} ${e.label} ${Math.round(v * 100)}%`).join(' · ') : '—');
+  const st = STATES.map((x) => [x, s.states[x.id]]).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  add('Stati più presenti (media)', st.map(([x, v]) => `${x.emoji} ${x.label} ${Math.round(v * 100)}%`).join(' · '));
+  add('Valenza / attivazione medie', `${s.valence.toFixed(2)} / ${s.arousal.toFixed(2)}`);
+  add('Attenzione media', `${Math.round(s.attention * 100)}%`);
+  add('Ammiccamenti', s.blinkRate === null ? '—' : `${Math.round(s.blinkRate)}/min`);
+  add('Micro-espressioni', String(s.microCount));
+  $('#dlg-summary').showModal();
+}
+
+const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+$('#btn-export-csv').addEventListener('click', () => downloadText(`sessione-facs-${stamp()}.csv`, recorder.toCSV(), 'text/csv'));
+$('#btn-export-json').addEventListener('click', () => downloadText(`sessione-facs-${stamp()}.json`, recorder.toJSON(), 'application/json'));
+
+// ---------- Finestre di dialogo ----------
+for (const btn of document.querySelectorAll('[data-close]')) {
+  btn.addEventListener('click', () => btn.closest('dialog').close());
+}
+$('#btn-help').addEventListener('click', () => $('#dlg-help').showModal());
+
+// ---------- Schermo sempre acceso durante l'analisi (tablet/telefono) ----------
+async function requestWakeLock() {
+  try { wakeLock = await navigator.wakeLock?.request('screen'); } catch { wakeLock = null; }
+}
+function releaseWakeLock() {
+  try { wakeLock?.release(); } catch { /* ignora */ }
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && running) {
+    requestWakeLock();
+    schedule();
+  }
+});
+
+window.addEventListener('resize', () => {
+  if (lastResult) { timeline.draw(performance.now()); circumplex.draw(); }
+});
+
+// ---------- Avvio ----------
+startPrivacyMonitor($('#privacy-badge'), $('#privacy-detail'));
+timeline.draw(performance.now());
+circumplex.draw();
+panels.update({ face: false });
+setStageMessage('Caricamento del modello…');
+loadModel().catch(() => {});
+
+if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+  navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker non registrato', err));
+}
+
+// Esposto per i test automatici (solo lettura dei numeri).
+window.__facs = { get last() { return lastResult; }, get delegate() { return delegate; }, analyzer };

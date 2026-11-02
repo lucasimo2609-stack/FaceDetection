@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!--
+    Privacy: la Content-Security-Policy impedisce alla pagina di contattare
+    qualsiasi server diverso da quello che la ospita (connect-src 'self').
+    Libreria MediaPipe e modello sono serviti localmente: nessuna CDN.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob: mediastream:; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Espressioni">
+  <meta name="description" content="Lettura delle espressioni facciali (FACS) dalla fotocamera, interamente nel browser con MediaPipe.">
+  <title>Lettore Espressioni FACS</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="stylesheet" href="css/style.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/icon.svg" alt="" width="28" height="28">
+      <div>
+        <h1>Lettore di Espressioni</h1>
+        <p class="sub">FACS · MediaPipe · 8 emozioni + 12 stati</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span id="privacy-badge" class="badge ok" title="Monitor delle connessioni di rete">🔒 100% locale</span>
+      <span id="perf" class="badge mono">—</span>
+      <button id="btn-help" class="icon-btn" type="button" aria-label="Come funziona">?</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <div class="col col-left">
+      <section class="stage-wrap order-1" aria-label="Fotocamera">
+        <div id="stage" class="stage">
+          <video id="video" playsinline muted autoplay></video>
+          <canvas id="overlay"></canvas>
+          <div id="stage-msg" class="stage-msg">
+            <p id="stage-text">Caricamento…</p>
+            <button id="btn-start-big" class="primary big" type="button" hidden>Avvia fotocamera</button>
+            <p class="fine">Le immagini vengono analizzate solo su questo dispositivo e non vengono mai salvate né inviate.</p>
+          </div>
+          <div id="calib" class="calib" hidden>
+            <p id="calib-text">Rilassa il viso…</p>
+            <span class="track wide"><span id="calib-bar" class="fill"></span></span>
+          </div>
+          <div id="toast" class="toast" hidden></div>
+        </div>
+        <div class="controls">
+          <button id="btn-start" class="primary" type="button">Avvia fotocamera</button>
+          <button id="btn-switch" type="button" disabled title="Fotocamera frontale / posteriore">🔄 Cambia</button>
+          <select id="sel-camera" aria-label="Fotocamera" hidden></select>
+          <button id="btn-calibrate" type="button" disabled>🎯 Calibra</button>
+          <button id="btn-record" type="button" disabled>● Registra</button>
+          <label class="field">Sovrapposizione
+            <select id="sel-overlay">
+              <option value="au">Contorni + AU</option>
+              <option value="contours">Solo contorni</option>
+              <option value="mesh">Mesh completa</option>
+              <option value="none">Nessuna</option>
+            </select>
+          </label>
+          <label class="field">Reattività
+            <select id="sel-reactivity">
+              <option value="0.6">Rapida</option>
+              <option value="1" selected>Normale</option>
+              <option value="1.8">Stabile</option>
+            </select>
+          </label>
+          <label class="check"><input id="chk-hide-video" type="checkbox"> Nascondi il video (solo maschera)</label>
+        </div>
+      </section>
+
+      <section class="card order-5">
+        <div class="card-head">
+          <h2>Andamento (ultimi 60 s)</h2>
+        </div>
+        <canvas id="timeline" class="chart"></canvas>
+        <div id="timeline-legend" class="legend"></div>
+      </section>
+
+      <section class="card order-6 split">
+        <div>
+          <h2>Valenza / attivazione</h2>
+          <canvas id="circumplex" class="chart square"></canvas>
+        </div>
+        <div>
+          <h2>Indicatori</h2>
+          <dl class="indicators">
+            <div><dt>Attenzione</dt><dd id="ind-attention">—</dd></div>
+            <div><dt>Valenza</dt><dd id="ind-valence">—</dd></div>
+            <div><dt>Attivazione</dt><dd id="ind-arousal">—</dd></div>
+            <div><dt>Ammiccamenti</dt><dd id="ind-blink">—</dd></div>
+            <div><dt>PERCLOS</dt><dd id="ind-perclos">—</dd></div>
+            <div><dt>Sbadigli (3 min)</dt><dd id="ind-yawns">—</dd></div>
+            <div><dt>Sta parlando</dt><dd id="ind-talking">—</dd></div>
+            <div><dt>Movimento testa</dt><dd id="ind-motion">—</dd></div>
+            <div class="wide"><dt>Testa (yaw, pitch, roll)</dt><dd id="ind-pose">—</dd></div>
+            <div class="wide"><dt>Sguardo</dt><dd id="ind-gaze">—</dd></div>
+          </dl>
+        </div>
+      </section>
+    </div>
+
+    <div class="col col-right">
+      <section id="hero" class="card hero order-2 dim" aria-live="polite">
+        <div id="hero-emoji" class="hero-emoji">👤</div>
+        <div class="hero-text">
+          <div id="hero-label" class="hero-label">In attesa</div>
+          <div id="hero-conf" class="hero-conf">Avvia la fotocamera</div>
+          <div id="hero-blend" class="hero-blend"></div>
+          <div id="hero-smile" class="pill" hidden></div>
+        </div>
+        <div id="hero-hint" class="hero-hint">
+          Per misure più precise calibra con il viso rilassato:
+          <button id="btn-calib-hint" type="button" class="link">calibra ora</button>
+        </div>
+      </section>
+
+      <section class="card order-3">
+        <div class="card-head">
+          <h2>8 emozioni di base</h2>
+          <span class="hint">tocca per i dettagli FACS</span>
+        </div>
+        <div id="emotions" class="bars"></div>
+      </section>
+
+      <section class="card order-4">
+        <div class="card-head">
+          <h2>12 stati sottili</h2>
+          <span class="hint">intensità indipendenti</span>
+        </div>
+        <div id="states" class="bars states"></div>
+      </section>
+
+      <section class="card order-7">
+        <div class="card-head">
+          <h2>Micro-espressioni</h2>
+          <span class="hint">picchi &lt; 0,5 s</span>
+        </div>
+        <p id="micro-empty" class="muted small">Nessuna rilevata finora.</p>
+        <ul id="micro-list" class="micro-list"></ul>
+      </section>
+
+      <details class="card order-8">
+        <summary><h2>Action Unit FACS</h2><span class="hint">intensità A–E</span></summary>
+        <div id="aus" class="aus"></div>
+        <div class="calib-status">
+          <span id="calib-status" class="muted small"></span>
+          <button id="btn-calib-reset" type="button" class="link" hidden>rimuovi calibrazione</button>
+        </div>
+      </details>
+    </div>
+  </main>
+
+  <footer class="footer">
+    <span id="privacy-detail"></span>
+  </footer>
+
+  <dialog id="dlg-summary" class="dialog">
+    <h2>Riepilogo della sessione</h2>
+    <dl id="summary-body" class="summary"></dl>
+    <p class="muted small">L'esportazione contiene solo numeri (AU, emozioni, stati, posa): nessuna immagine. Il file viene creato nel browser e salvato sul tuo dispositivo.</p>
+    <div class="dialog-actions">
+      <button id="btn-export-csv" type="button">Scarica CSV</button>
+      <button id="btn-export-json" type="button">Scarica JSON</button>
+      <button type="button" class="primary" data-close>Chiudi</button>
+    </div>
+  </dialog>
+
+  <dialog id="dlg-help" class="dialog wide">
+    <h2>Come funziona</h2>
+    <ol class="steps">
+      <li><strong>Rilevamento</strong> — MediaPipe Face Landmarker individua 478 punti del volto e calcola 52 coefficienti di espressione (blendshape) e la posa 3D della testa.</li>
+      <li><strong>Codifica FACS</strong> — i coefficienti vengono convertiti in 24 Action Unit del Facial Action Coding System (Ekman &amp; Friesen), con intensità A–E, correggendo gli effetti collaterali tipici (es. il sorriso ampio che abbassa le sopracciglia).</li>
+      <li><strong>8 emozioni di base</strong> — neutralità, gioia, tristezza, sorpresa, paura, rabbia, disgusto, disprezzo, dalle combinazioni di AU di EMFACS. Se due emozioni sono presenti insieme viene indicata l'emozione composta (es. sorpresa + gioia = meraviglia).</li>
+      <li><strong>12 stati sottili</strong> — concentrazione, interesse, confusione, scetticismo, noia, stanchezza, ansia, frustrazione, imbarazzo, sorriso di cortesia, riflessione, orgoglio: combinano AU deboli, posa della testa, sguardo e dinamiche nel tempo (frequenza degli ammiccamenti, PERCLOS, sbadigli, movimento, parlato).</li>
+    </ol>
+    <h3>Consigli</h3>
+    <ul>
+      <li>Usa una luce frontale e uniforme, con il viso intero nell'inquadratura.</li>
+      <li><strong>Calibra</strong> all'inizio: 3 secondi con il viso rilassato. Ogni volto ha una "espressione a riposo" diversa; la calibrazione la sottrae e migliora molto la precisione.</li>
+      <li>Gli stati lenti (noia, stanchezza, ammiccamenti) hanno bisogno di 15–60 secondi di osservazione.</li>
+    </ul>
+    <h3>Privacy</h3>
+    <ul>
+      <li>L'analisi gira interamente nel browser (WebAssembly/WebGL). Nessun fotogramma viene salvato, registrato o trasmesso.</li>
+      <li>Libreria e modello sono serviti da questo stesso sito; la Content-Security-Policy blocca ogni connessione verso altri server e l'indicatore in alto conta eventuali tentativi.</li>
+      <li>Viene memorizzata in locale solo la calibrazione (numeri) e le preferenze. La registrazione della sessione contiene solo numeri e resta in memoria finché non la scarichi.</li>
+    </ul>
+    <h3>Limiti</h3>
+    <ul>
+      <li>Un'espressione non coincide con ciò che una persona prova: il sistema descrive movimenti del volto e li interpreta con regole della letteratura, non legge la mente.</li>
+      <li>Accuratezza ridotta con occhiali spessi, mascherine, barba folta, luce scarsa, volto di profilo o mentre si parla.</li>
+      <li>Strumento sperimentale per uso personale, didattico o di ricerca. Non usarlo per decisioni su altre persone (selezione, valutazione, sorveglianza): nell'UE il riconoscimento delle emozioni sul luogo di lavoro e a scuola è vietato dall'AI Act (art. 5).</li>
+    </ul>
+    <div class="dialog-actions">
+      <button type="button" class="primary" data-close>Ho capito</button>
+    </div>
+  </dialog>
+</body>
+</html>

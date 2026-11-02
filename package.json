@@ -1,0 +1,13 @@
+{
+  "name": "lettore-espressioni-facs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lettura delle espressioni facciali (FACS) nel browser con MediaPipe: 8 emozioni di base e 12 stati sottili, elaborazione 100% locale.",
+  "type": "module",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "start:https": "python3 scripts/serve_https.py",
+    "test": "node --test tests/unit/*.test.mjs",
+    "test:e2e": "node tests/e2e/privacy-smoke.mjs"
+  }
+}
