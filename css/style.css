@@ -110,6 +110,26 @@ button.recording { background: var(--danger); color: #fff; border-color: transpa
   .brand img { width: 24px; height: 24px; }
 }
 
+/* ---------- Invito all'installazione ---------- */
+.install {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  max-width: 1440px;
+  margin: 12px auto 0;
+  padding: 0.7rem 0.9rem;
+  width: calc(100% - 32px);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.install img { border-radius: 10px; flex-shrink: 0; }
+.install-text { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; font-size: 0.88rem; }
+.install-text span { color: var(--muted); }
+.install-text b { color: var(--text); }
+.share-icon { width: 1.1em; height: 1.1em; vertical-align: -0.15em; color: var(--accent); }
+
 /* ---------- Layout ---------- */
 .layout {
   max-width: 1440px;

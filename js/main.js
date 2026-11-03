@@ -12,6 +12,7 @@ import { EMOTIONS, EMOTION_BY_ID } from './emotions.js';
 import { STATES } from './states.js';
 import { startPrivacyMonitor } from './privacy.js';
 import { PersonalModel } from './model.js';
+import { setupInstallBanner, isStandalone, cameraAlreadyAllowed } from './install.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -128,7 +129,7 @@ function loadModel() {
 }
 
 // ---------- Fotocamera ----------
-async function startCamera(opts = {}) {
+async function startCamera(opts = {}, { auto = false } = {}) {
   btnStart.disabled = true;
   btnStartBig.disabled = true;
   try {
@@ -153,6 +154,11 @@ async function startCamera(opts = {}) {
     console.error(err);
     camera.stop();
     running = false;
+    if (auto) {
+      // Avvio automatico non riuscito (es. permesso da confermare): basta un tocco.
+      setStageMessage('Tocca «Avvia fotocamera» per iniziare.', { showButton: true });
+      return;
+    }
     const msg = err?.name === 'NotAllowedError'
       ? 'Accesso alla fotocamera negato. Consentilo dalle impostazioni del browser e riprova.'
       : err?.name === 'NotFoundError'
@@ -571,6 +577,13 @@ function releaseWakeLock() {
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && running) {
+    // Su iPad/iPhone il sistema spegne la fotocamera quando l'app va in
+    // secondo piano: al ritorno la riaccendiamo.
+    if (camera.ended) {
+      running = false;
+      startCamera({}, { auto: true });
+      return;
+    }
     requestWakeLock();
     schedule();
   }
@@ -586,7 +599,15 @@ timeline.draw(performance.now());
 circumplex.draw();
 panels.update({ face: false });
 setStageMessage('Caricamento del modello…');
-loadModel().catch(() => {});
+setupInstallBanner({ storage });
+
+// Aperta come app dalla schermata Home (o con la fotocamera già autorizzata):
+// la fotocamera parte da sola, senza dover premere nulla.
+(async () => {
+  try { await loadModel(); } catch { return; }
+  if (running) return;
+  if (isStandalone() || await cameraAlreadyAllowed()) startCamera({}, { auto: true });
+})();
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker non registrato', err));

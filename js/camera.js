@@ -11,6 +11,12 @@ export class Camera {
 
   get active() { return Boolean(this.stream); }
 
+  // Il sistema ha chiuso la fotocamera (es. app in secondo piano su iPad).
+  get ended() {
+    const track = this.stream?.getVideoTracks()[0];
+    return Boolean(track) && track.readyState === 'ended';
+  }
+
   async start({ deviceId = this.deviceId, facingMode = this.facingMode, hd = false } = {}) {
     this.stop();
     if (!navigator.mediaDevices?.getUserMedia) {

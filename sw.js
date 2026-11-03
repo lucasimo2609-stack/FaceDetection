@@ -2,7 +2,7 @@
 // Mette in cache SOLO i file dell'app (codice, libreria, modello): non vede
 // e non memorizza mai immagini della fotocamera, che non passano dalla rete.
 
-const VERSION = 'v1.1.0';
+const VERSION = 'v1.2.0';
 const SHELL_CACHE = `facs-shell-${VERSION}`;
 const ASSET_CACHE = 'facs-assets-mediapipe-0.10.32';
 
@@ -22,6 +22,7 @@ const SHELL = [
   'js/facs.js',
   'js/features.js',
   'js/headpose.js',
+  'js/install.js',
   'js/landmarker.js',
   'js/model.js',
   'js/model-data.js',
@@ -35,8 +36,26 @@ const SHELL = [
   'vendor/mediapipe/vision_bundle.mjs',
 ];
 
+// Modello e runtime WebAssembly (~15 MB): scaricati subito all'installazione,
+// così l'app installata sulla schermata Home funziona offline fin dalla
+// seconda apertura. La variante "nosimd" serve solo a browser molto vecchi e
+// viene messa in cache se e quando viene usata.
+const ASSETS = [
+  'models/face_landmarker.task',
+  'vendor/mediapipe/wasm/vision_wasm_internal.js',
+  'vendor/mediapipe/wasm/vision_wasm_internal.wasm',
+];
+
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil((async () => {
+    const shell = await caches.open(SHELL_CACHE);
+    await shell.addAll(SHELL);
+    const assets = await caches.open(ASSET_CACHE);
+    await Promise.allSettled(ASSETS.map(async (url) => {
+      if (!(await assets.match(url))) await assets.add(url);
+    }));
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {

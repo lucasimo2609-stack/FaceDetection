@@ -55,9 +55,11 @@ const check = (ok, msg) => {
 
 try {
   await page.goto(url);
-  await page.waitForSelector('#btn-start-big:not([hidden])', { timeout: 120000 });
+  // Con il permesso già concesso la fotocamera parte da sola; altrimenti
+  // compare il pulsante "Avvia fotocamera".
+  await page.waitForFunction(() => window.__facs?.last || !document.querySelector('#btn-start-big').hidden, null, { timeout: 120000 });
   check(true, 'modello caricato');
-  await page.click('#btn-start');
+  if (!(await page.evaluate(() => Boolean(window.__facs?.last)))) await page.click('#btn-start');
   await page.waitForFunction(() => window.__facs?.last, null, { timeout: 30000 });
   await page.waitForTimeout(4000);
   const state = await page.evaluate(() => ({

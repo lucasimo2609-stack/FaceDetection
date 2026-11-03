@@ -28,25 +28,38 @@ vengono salvati nel browser solo come numeri e restano per le volte successive.
 > Non aprire `index.html` con doppio clic (`file://`): i moduli JavaScript e la
 > fotocamera richiedono un server, anche locale.
 
-### Su iPad / telefono
-Il browser concede la fotocamera solo su **HTTPS**. Due possibilità:
+### Su iPad / iPhone: come app, senza computer
+L'app si installa sulla schermata Home come un'app normale: icona, schermo
+intero, fotocamera che parte da sola, funziona anche **senza internet** dopo la
+prima apertura. Non serve l'App Store né un computer. Requisiti: iPadOS/iOS 16.4
+o successivo.
 
-1. **GitHub Pages (consigliato)** — il workflow `.github/workflows/pages.yml`
-   pubblica l'app a ogni push sul ramo `main`. Una tantum: *Settings → Pages →
-   Build and deployment → Source: GitHub Actions*. L'indirizzo sarà
-   `https://<utente>.github.io/<repository>/`. Da Safari si può poi fare
-   *Condividi → Aggiungi alla schermata Home*: l'app si installa e funziona anche
-   offline. (Pages gratuito richiede un repository pubblico.)
-2. **Rete locale** — sul PC:
-   ```bash
-   python3 scripts/serve_https.py
-   ```
-   e apri sul tablet l'indirizzo `https://192.168.x.x:8443/` stampato a schermo
-   (stessa rete Wi-Fi). Il certificato è autofirmato: Safari mostra un avviso,
-   tocca *Mostra dettagli → visita il sito web*.
+**Una volta sola (si può fare dall'iPad, in Safari):** attiva GitHub Pages
+1. Apri <https://github.com/lucasimo2609-stack/FaceDetection> e accedi.
+2. *Settings* → *Pages* (se non vedi *Settings*: tocca **aA** nella barra
+   dell'indirizzo → *Richiedi sito web desktop*).
+3. In *Build and deployment* → *Source* scegli **Deploy from a branch**, poi
+   ramo **`claude/practical-carson-glockk`**, cartella **`/ (root)`** → **Save**.
+4. Dopo 1–2 minuti l'app è online su
+   <https://lucasimo2609-stack.github.io/FaceDetection/> e si aggiorna da sola a
+   ogni modifica del ramo.
 
-Anche in questi casi le immagini restano sul dispositivo che apre la pagina: il
-server fornisce solo i file dell'app.
+**Installazione sull'iPad**
+1. Apri l'indirizzo qui sopra in **Safari** (compare anche un riquadro con le istruzioni).
+2. Tocca **Condividi** (il quadrato con la freccia) → **Aggiungi alla schermata Home** → **Aggiungi**.
+3. Apri l'icona **Espressioni**: la fotocamera si avvia da sola.
+4. Fai **🧑‍🏫 Addestra sul tuo viso** *dentro l'app installata* (ha una memoria
+   separata da Safari).
+
+Se iOS chiede il permesso della fotocamera a ogni apertura: *Impostazioni* →
+*Safari* → *Fotocamera* → **Consenti**.
+
+In alternativa, per provarla dalla rete di casa senza pubblicarla:
+`python3 scripts/serve_https.py` sul PC e apri sull'iPad l'indirizzo
+`https://192.168.x.x:8443/` stampato a schermo (certificato autofirmato: Safari
+mostra un avviso, tocca *Mostra dettagli → visita il sito web*).
+
+Le immagini restano comunque sull'iPad: il sito fornisce solo i file dell'app.
 
 ---
 
@@ -199,8 +212,10 @@ l'uso con la propria webcam la differenza la fa l'**addestramento personale**.
   punto anatomico corrispondente, direzione della testa; opzione **"nascondi il
   video"** per vedere solo la maschera.
 - **Reattività** regolabile (rapida / normale / stabile).
-- **PWA**: installabile su iPad/telefono, funziona offline, schermo sempre acceso
-  durante l'analisi.
+- **App per iPad/iPhone/Android (PWA)**: si installa sulla schermata Home, si
+  apre a schermo intero con la fotocamera che parte da sola, scarica subito
+  modello e runtime per funzionare offline, riaccende la fotocamera quando torni
+  all'app, tiene lo schermo acceso durante l'analisi.
 - **Ripiego automatico GPU → CPU** se la GPU non è disponibile o fallisce.
 
 ---
@@ -242,6 +257,7 @@ js/charts.js            grafico temporale e circonflesso
 js/ui.js                pannelli
 js/session.js           registrazione ed esportazione (solo numeri)
 js/privacy.js           monitor delle connessioni
+js/install.js           installazione come app (iPad/iPhone/Android), avvio automatico
 sw.js                   service worker (offline)
 vendor/mediapipe/       MediaPipe Tasks Vision 0.10.32 (Apache 2.0)
 models/                 face_landmarker.task

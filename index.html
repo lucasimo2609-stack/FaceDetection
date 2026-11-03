@@ -39,6 +39,18 @@
     </div>
   </header>
 
+  <div id="install" class="install" hidden>
+    <img src="icons/icon-180.png" alt="" width="44" height="44">
+    <div class="install-text">
+      <strong id="install-title">Installa l'app</strong>
+      <span id="install-how" hidden>Tocca <b>Condividi</b>
+        <svg class="share-icon" viewBox="0 0 24 24" aria-label="icona Condividi"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 10H6a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        <span id="install-where">in alto</span> e poi <b>«Aggiungi alla schermata Home»</b>. Da lì si apre a schermo intero e funziona anche senza internet.</span>
+    </div>
+    <button id="btn-install" type="button" class="primary" hidden>Installa</button>
+    <button id="btn-install-close" type="button" class="icon-btn" aria-label="Chiudi">×</button>
+  </div>
+
   <main class="layout">
     <div class="col col-left">
       <section class="stage-wrap order-1" aria-label="Fotocamera">
@@ -210,6 +222,13 @@
       <li>In alternativa almeno <strong>Calibra</strong>: 3 secondi con il viso rilassato. Ogni volto ha una "espressione a riposo" diversa; la calibrazione la sottrae.</li>
       <li>Gli stati lenti (noia, stanchezza, ammiccamenti) hanno bisogno di 15–60 secondi di osservazione.</li>
     </ul>
+    <h3>Usarla come app su iPad o iPhone</h3>
+    <ol>
+      <li>Apri questa pagina in <strong>Safari</strong>.</li>
+      <li>Tocca <strong>Condividi</strong> (il quadrato con la freccia) e poi <strong>«Aggiungi alla schermata Home»</strong>.</li>
+      <li>Apri l'icona <strong>Espressioni</strong>: parte a schermo intero e la fotocamera si avvia da sola. Dopo la prima apertura funziona anche offline.</li>
+      <li>Fai l'<strong>addestramento sul tuo viso</strong> dentro l'app installata: l'app sulla Home ha una memoria separata da Safari.</li>
+    </ol>
     <h3>Privacy</h3>
     <ul>
       <li>L'analisi gira interamente nel browser (WebAssembly/WebGL). Nessun fotogramma viene salvato, registrato o trasmesso.</li>
