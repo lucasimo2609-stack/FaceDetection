@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { BLENDSHAPE_NAMES } from '../../js/facs.js';
 
 // Blendshape "a riposo" (mediane dei volti neutri misurate sul dataset di
@@ -34,16 +35,11 @@ export function identity() {
   return [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, -60, 1];
 }
 
-// 478 landmark plausibili: occhi, bocca e naso nelle posizioni usate da geometry().
+// 478 landmark realistici: "viso medio" neutro (mediana di ~1.200 volti
+// allineati, generato da tools/model/shape_stats.mjs; non è una persona reale).
+const AVERAGE_FACE = JSON.parse(readFileSync(new URL('./fixtures/average-face.json', import.meta.url), 'utf8'));
 export function fakeLandmarks() {
-  const lm = Array.from({ length: 478 }, () => ({ x: 0.5, y: 0.5, z: 0 }));
-  const set = (i, x, y, z = 0) => { lm[i] = { x, y, z }; };
-  set(33, 0.40, 0.42); set(133, 0.46, 0.42); set(159, 0.43, 0.41); set(145, 0.43, 0.43);
-  set(263, 0.60, 0.42); set(362, 0.54, 0.42); set(386, 0.57, 0.41); set(374, 0.57, 0.43);
-  set(1, 0.5, 0.5, -0.05); set(10, 0.5, 0.3); set(152, 0.5, 0.7);
-  set(61, 0.45, 0.6); set(291, 0.55, 0.6); set(0, 0.5, 0.58); set(13, 0.5, 0.595);
-  set(14, 0.5, 0.6); set(17, 0.5, 0.62);
-  return lm;
+  return AVERAGE_FACE.map(([x, y, z]) => ({ x, y, z }));
 }
 
 export function rotation(axis, deg) {

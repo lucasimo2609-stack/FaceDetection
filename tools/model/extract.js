@@ -19,7 +19,13 @@ for (const it of list) {
     await img.decode();
     const r = fl.detect(img);
     out.push(r.faceLandmarks.length
-      ? { ...it, face: true, b: toBlendshapeMap(r.faceBlendshapes[0].categories), geom: geometry(r.faceLandmarks[0], img.naturalWidth, img.naturalHeight) }
+      ? {
+        ...it, face: true, w: img.naturalWidth, h: img.naturalHeight,
+        b: toBlendshapeMap(r.faceBlendshapes[0].categories),
+        geom: geometry(r.faceLandmarks[0], img.naturalWidth, img.naturalHeight),
+        // Landmark arrotondati: servono per calcolare la forma (shape.js) offline.
+        lm: r.faceLandmarks[0].map((p) => [+p.x.toFixed(5), +p.y.toFixed(5), +p.z.toFixed(5)]),
+      }
       : { ...it, face: false });
   } catch (e) {
     out.push({ ...it, face: false, err: String(e) });

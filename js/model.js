@@ -6,7 +6,7 @@
 // Entrambi lavorano sullo stesso vettore di feature (features.js).
 
 import { MODEL } from './model-data.js';
-import { FEATURE_NAMES } from './features.js';
+import { FEATURE_NAMES, PERSONAL_FEATURE_NAMES, SHAPE_SCALE } from './features.js';
 import { EMOTION_IDS } from './emotions.js';
 import { median } from './util.js';
 
@@ -15,6 +15,9 @@ if (MODEL.features.join() !== FEATURE_NAMES.join()) {
 }
 
 const D = FEATURE_NAMES.length;
+// Modello personale: feature globali + forma; scala per renderle confrontabili.
+const PD = PERSONAL_FEATURE_NAMES.length;
+const PSCALE = [...MODEL.scale, ...SHAPE_SCALE];
 
 // Probabilità delle 8 emozioni secondo il modello globale.
 export function predictGlobal(x) {
@@ -69,6 +72,9 @@ export function combineProbs(parts) {
 // proiezione dal centroide neutro verso quello dell'emozione.
 // ---------------------------------------------------------------------------
 export class PersonalModel {
+  // v2: vettore con le misure di forma (curvatura di sopracciglia e palpebre).
+  static VERSION = 2;
+
   constructor(data) {
     this.data = data; // { version, created, centroids: {id: number[]}, counts, weights, temperature }
     this.ids = Object.keys(data.centroids);
@@ -79,41 +85,41 @@ export class PersonalModel {
     if (!ids.includes('neutral') || ids.length < 3) {
       throw new Error('Servono almeno l\'espressione neutra e altre due espressioni');
     }
-    const std = (x) => x.map((v, j) => v / MODEL.scale[j]);
+    const std = (x) => x.map((v, j) => v / PSCALE[j]);
     const centroids = {}, counts = {};
-    const within = new Array(D).fill(0);
+    const within = new Array(PD).fill(0);
     let nWithin = 0;
     for (const id of ids) {
       const zs = samplesByClass[id].map(std);
-      const c = new Array(D).fill(0);
-      for (const z of zs) for (let j = 0; j < D; j++) c[j] += z[j] / zs.length;
-      for (const z of zs) for (let j = 0; j < D; j++) within[j] += (z[j] - c[j]) ** 2;
+      const c = new Array(PD).fill(0);
+      for (const z of zs) for (let j = 0; j < PD; j++) c[j] += z[j] / zs.length;
+      for (const z of zs) for (let j = 0; j < PD; j++) within[j] += (z[j] - c[j]) ** 2;
       nWithin += zs.length;
       centroids[id] = c;
       counts[id] = zs.length;
     }
     // Pesi di Fisher: varianza fra i centroidi / (varianza interna + rumore).
-    const weights = new Array(D);
-    for (let j = 0; j < D; j++) {
+    const weights = new Array(PD);
+    for (let j = 0; j < PD; j++) {
       const vals = ids.map((id) => centroids[id][j]);
       const mu = vals.reduce((a, b) => a + b, 0) / vals.length;
       const between = vals.reduce((a, v) => a + (v - mu) ** 2, 0) / vals.length;
       weights[j] = Math.min(10, between / (within[j] / nWithin + 0.05));
     }
     const wsum = weights.reduce((a, b) => a + b, 0) || 1;
-    for (let j = 0; j < D; j++) weights[j] /= wsum;
+    for (let j = 0; j < PD; j++) weights[j] /= wsum;
     // Temperatura: un quarto della distanza tipica fra due espressioni.
     const pair = [];
     for (let a = 0; a < ids.length; a++) {
       for (let b = a + 1; b < ids.length; b++) pair.push(dist2(centroids[ids[a]], centroids[ids[b]], weights));
     }
     const temperature = Math.max(1e-4, 0.25 * median(pair));
-    return new PersonalModel({ version: 1, created: Date.now(), centroids, counts, weights, temperature });
+    return new PersonalModel({ version: PersonalModel.VERSION, created: Date.now(), centroids, counts, weights, temperature });
   }
 
   predict(x) {
     const { centroids, weights, temperature } = this.data;
-    const z = x.map((v, j) => v / MODEL.scale[j]);
+    const z = x.map((v, j) => v / PSCALE[j]);
     const d = {};
     let min = Infinity;
     for (const id of this.ids) { d[id] = dist2(z, centroids[id], weights); min = Math.min(min, d[id]); }

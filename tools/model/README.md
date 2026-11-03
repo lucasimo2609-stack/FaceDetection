@@ -50,6 +50,16 @@ per le altre emozioni (`GLOBAL_WEIGHT` in `js/analyzer.js`).
 Il guadagno più grande per una singola persona viene comunque
 dall'**addestramento personale** nell'app (🧑‍🏫 *Addestra sul tuo viso*).
 
+## Riferimenti di forma (`js/shape-data.js`)
+
+`shape_stats.mjs` calcola dagli stessi volti (con i landmark salvati da
+`extract.mjs`): la dipendenza di ogni misura di forma dall'inclinazione della
+testa (pendenza di Theil-Sen sui volti neutri, poi compensata), il valore neutro
+di riferimento, la scala di un'espressione marcata, la variabilità naturale fra
+persone e i contorni medi del viso neutro. Genera anche
+`tests/unit/fixtures/average-face.json`, un "viso medio" (mediana di volti
+allineati, non una persona reale) usato dai test.
+
 ## Riprodurre
 
 ```bash
@@ -58,8 +68,10 @@ dall'**addestramento personale** nell'app (🧑‍🏫 *Addestra sul tuo viso*).
 python3 -m http.server 8000 &
 # 2. estrai blendshape e geometria con MediaPipe (Playwright + Chromium)
 node tools/model/extract.mjs "http://localhost:8000/tools/model/extract.html?list=/dati/lista.json" features.json
-# 3. calcola le feature con il codice dell'app
+# 3. riferimenti di forma (scrive js/shape-data.js)
+node tools/model/shape_stats.mjs features.json
+# 4. calcola le feature con il codice dell'app
 node tools/model/export_matrix.mjs features.json matrix.json
-# 4. valida e scrivi js/model-data.js (richiede numpy e scikit-learn)
+# 5. valida e scrivi js/model-data.js (richiede numpy e scikit-learn)
 python3 tools/model/train.py matrix.json legend.csv --write
 ```

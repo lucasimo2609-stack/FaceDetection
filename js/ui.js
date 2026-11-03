@@ -43,6 +43,7 @@ export class Panels {
     this.buildEmotions();
     this.buildStates();
     this.buildAUs();
+    this.buildShape();
     this.ind = {
       blink: $('#ind-blink'), perclos: $('#ind-perclos'), attention: $('#ind-attention'),
       valence: $('#ind-valence'), arousal: $('#ind-arousal'), pose: $('#ind-pose'),
@@ -91,7 +92,43 @@ export class Panels {
     }
   }
 
+  // Indicatori di forma: barre divergenti (-1..1) attorno al neutro.
+  buildShape() {
+    const box = $('#shape-meters');
+    this.shapeRows = {};
+    if (!box) return;
+    for (const m of SHAPE_METERS) {
+      const row = el('div', 'shape-row');
+      row.title = m.help;
+      const label = el('span', 'shape-label', m.label);
+      const track = el('span', 'dtrack');
+      const fill = el('span', 'dfill');
+      track.append(fill);
+      const text = el('span', 'shape-text', '—');
+      row.append(label, track, text);
+      box.append(row);
+      this.shapeRows[m.key] = { fill, text, m };
+    }
+  }
+
+  updateShape(d) {
+    if (!d) return;
+    const groups = {};
+    for (const { fill, text, m } of Object.values(this.shapeRows)) {
+      const v = Math.max(-1, Math.min(1, m.value(d)));
+      fill.style.left = `${50 + Math.min(0, v) * 50}%`;
+      fill.style.width = `${Math.abs(v) * 50}%`;
+      fill.classList.toggle('neg', v < 0);
+      const word = v > 0.35 ? m.pos : v < -0.35 && m.neg ? m.neg : '';
+      text.textContent = word || 'normale';
+      if (word) (groups[m.group] ||= []).push(word);
+    }
+    const parts = Object.entries(groups).map(([g, w]) => `${g}: ${w.join(', ')}`);
+    $('#shape-summary').textContent = parts.length ? parts.join(' · ') : 'Forma vicina al viso neutro';
+  }
+
   update(r) {
+    if (r.face) this.updateShape(r.shape);
     if (!r.face) {
       this.hero.card.classList.add('dim');
       this.hero.label.textContent = 'Nessun volto';
@@ -198,3 +235,23 @@ function gazeDir(g) {
   const h = Math.abs(g.x) > 0.3 ? 'di lato' : '';
   return [v, h].filter(Boolean).join(' e ') || 'al centro';
 }
+
+// Misure di forma mostrate all'utente (valori in unità di "espressione marcata").
+const SHAPE_METERS = [
+  { key: 'browH', group: 'Sopracciglia', label: 'Altezza sopracciglia', neg: 'abbassate', pos: 'alzate',
+    value: (d) => (d.browInner + d.browOuter) / 2, help: 'AU1/AU2 (su) · AU4 (giù)' },
+  { key: 'browSlope', group: 'Sopracciglia', label: 'Inclinazione sopracciglia', neg: 'a V', pos: 'oblique',
+    value: (d) => d.browSlope, help: 'Oblique (interno più alto: tristezza, paura) · a V (interno più basso: rabbia)' },
+  { key: 'browArch', group: 'Sopracciglia', label: 'Arco sopracciglia', neg: 'piatte', pos: 'ad arco',
+    value: (d) => d.browArch, help: 'Curvatura del sopracciglio: ad arco nella sorpresa' },
+  { key: 'browGap', group: 'Sopracciglia', label: 'Distanza sopracciglia', neg: 'ravvicinate', pos: 'distanziate',
+    value: (d) => d.browGap, help: 'Ravvicinate = corrugatore (AU4): paura, rabbia, concentrazione' },
+  { key: 'eyeOpen', group: 'Occhi', label: 'Apertura occhi', neg: 'socchiusi', pos: 'spalancati',
+    value: (d) => (d.eyeOpen + d.upperLid) / 2, help: 'AU5 (spalancati) · AU7/AU43 (socchiusi)' },
+  { key: 'lowerLid', group: 'Occhi', label: 'Palpebra inferiore', neg: 'palpebra inf. sollevata', pos: 'palpebra inf. abbassata',
+    value: (d) => d.lowerLid, help: 'Sollevata = AU6 (sorriso genuino) o AU7 (tensione)' },
+  { key: 'corners', group: 'Bocca', label: 'Angoli della bocca', neg: 'angoli in giù', pos: 'angoli in su',
+    value: (d) => d.mouthCorners, help: 'AU12 (su) · AU15 (giù)' },
+  { key: 'cornerAsym', group: 'Bocca', label: 'Asimmetria bocca', neg: '', pos: 'un angolo più alto',
+    value: (d) => Math.max(0, d.mouthCornerAsym), help: 'Un solo angolo sollevato: disprezzo' },
+];

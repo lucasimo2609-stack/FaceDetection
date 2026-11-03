@@ -6,13 +6,14 @@ import { Camera } from './camera.js';
 import { Analyzer } from './analyzer.js';
 import { Overlay } from './overlay.js';
 import { Panels } from './ui.js';
-import { Timeline, Circumplex } from './charts.js';
+import { Timeline, Circumplex, ShapeView } from './charts.js';
 import { SessionRecorder, downloadText } from './session.js';
 import { EMOTIONS, EMOTION_BY_ID } from './emotions.js';
 import { STATES } from './states.js';
 import { startPrivacyMonitor } from './privacy.js';
 import { PersonalModel } from './model.js';
 import { setupInstallBanner, isStandalone, cameraAlreadyAllowed } from './install.js';
+import { SHAPE_DATA } from './shape-data.js';
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -44,6 +45,7 @@ const overlay = new Overlay($('#overlay'));
 const panels = new Panels();
 const timeline = new Timeline($('#timeline'));
 const circumplex = new Circumplex($('#circumplex'));
+const shapeView = new ShapeView($('#shape-view'));
 const recorder = new SessionRecorder();
 
 let landmarker = null;
@@ -316,6 +318,12 @@ function processFrame() {
       if (r.face) circumplex.push(now, r.valence, r.arousal);
       timeline.draw(now);
       circumplex.draw();
+      if (r.face) {
+        const cal = analyzer.calibration?.contours;
+        $('#shape-ref').textContent = cal ? 'rispetto al tuo viso neutro' : 'rispetto a un viso medio · calibra per usare il tuo';
+        shapeView.mirror = camera.shouldMirror;
+        shapeView.draw(r.contours, cal || SHAPE_DATA.neutralContours, { amplify: cal ? 2 : 1, color: EMOTION_BY_ID[r.dominant].color });
+      }
     }
   }
 }
@@ -611,6 +619,20 @@ setupInstallBanner({ storage });
 
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
   navigator.serviceWorker.register('sw.js').catch((err) => console.warn('Service worker non registrato', err));
+  // Avvisa una volta quando modello e runtime sono salvati: da lì in poi l'app
+  // funziona anche senza internet.
+  navigator.serviceWorker.ready.then(async () => {
+    try {
+      if (storage?.getItem('facs-offline-ready')) return;
+      const key = (await caches.keys()).find((k) => k.includes('assets'));
+      if (!key) return;
+      const c = await caches.open(key);
+      if (await c.match('vendor/mediapipe/wasm/vision_wasm_internal.wasm') && await c.match('models/face_landmarker.task')) {
+        storage?.setItem('facs-offline-ready', '1');
+        toast('✅ Pronta: da ora funziona anche senza internet');
+      }
+    } catch { /* ignora */ }
+  });
 }
 
 // Esposto per i test automatici (solo lettura dei numeri).

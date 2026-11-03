@@ -2,7 +2,7 @@
 // Mette in cache SOLO i file dell'app (codice, libreria, modello): non vede
 // e non memorizza mai immagini della fotocamera, che non passano dalla rete.
 
-const VERSION = 'v1.2.0';
+const VERSION = 'v1.3.0';
 const SHELL_CACHE = `facs-shell-${VERSION}`;
 const ASSET_CACHE = 'facs-assets-mediapipe-0.10.32';
 
@@ -29,6 +29,8 @@ const SHELL = [
   'js/overlay.js',
   'js/privacy.js',
   'js/session.js',
+  'js/shape.js',
+  'js/shape-data.js',
   'js/states.js',
   'js/temporal.js',
   'js/ui.js',

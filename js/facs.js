@@ -7,7 +7,20 @@
 // come combinazione dei blendshape normalizzati (0..1) rispetto a una linea di
 // base (calibrazione con viso neutro) e a un valore massimo tipico.
 
-import { clamp01, median, mad } from './util.js';
+import { clamp01, median, mad, noisyOr } from './util.js';
+import { shapeDeltas, shrinkDeltas, SHAPE_NAMES } from './shape.js';
+
+// Fiducia nell'evidenza geometrica (forma di sopracciglia, palpebre, bocca):
+// più alta dopo la calibrazione, quando il riferimento è il viso neutro della
+// persona e non quello medio.
+const GEO_WEIGHT = 0.5;
+const GEO_WEIGHT_CAL = 0.8;
+// AU che i blendshape di MediaPipe colgono male: la geometria può solo
+// aggiungere evidenza (OR). Per le altre si fa una media pesata.
+const GEO_WEAK_BLEND = new Set(['AU5', 'AU6', 'AU7', 'AU9', 'AU15']);
+// Senza calibrazione si usano solo queste (le altre misure dipendono troppo
+// dall'anatomia della persona, es. lunghezza del filtro labiale o ali del naso).
+const GEO_UNCALIBRATED = new Set(['AU5', 'AU6', 'AU7', 'AU15']);
 
 export const BLENDSHAPE_NAMES = [
   '_neutral', 'browDownLeft', 'browDownRight', 'browInnerUp', 'browOuterUpLeft',
@@ -169,7 +182,9 @@ export class FacsEncoder {
     return clamp01((v - rest - dz) / Math.max(0.03, max - rest - dz));
   }
 
-  encode(b, geom) {
+  // `shape` (facoltativo) = output di shapeFeatures: aggiunge l'evidenza
+  // geometrica di forma e curvatura.
+  encode(b, geom, shape = null) {
     const n = {};
     for (const name of BLENDSHAPE_NAMES) {
       if (name === '_neutral' || GAZE_NAMES.has(name)) continue;
@@ -273,7 +288,49 @@ export class FacsEncoder {
       AU14: Math.abs(side.AU14.l - side.AU14.r),
       AU10: Math.abs(side.AU10.l - side.AU10.r),
       brow: Math.abs(side.AU2.l - side.AU2.r) + 0.5 * Math.abs(side.AU4.l - side.AU4.r),
+      corner: 0,
     };
+
+    // ---- Evidenza geometrica: forma e curvatura nel riferimento del viso ----
+    // d.* = scarto dal neutro in unità di "espressione marcata" (vedi shape.js).
+    let d = null;
+    if (shape) {
+      const calibrated = Boolean(this.calibration?.shape);
+      d = shapeDeltas(shape, this.calibration?.shape);
+      if (!calibrated) d = shrinkDeltas(d);
+      const w = calibrated ? GEO_WEIGHT_CAL : GEO_WEIGHT;
+      const smileG = soft01(smileAvg, 0.45);
+      const g = {
+        // Parte interna del sopracciglio alzata, sopracciglio obliquo (∕ ∖).
+        AU1: clamp01(0.6 * soft01(d.browInner, 0.8) + 0.4 * soft01(d.browSlope, 0.8)),
+        AU2: soft01(d.browOuter, 0.8),
+        // Sopracciglia abbassate, ravvicinate e "a V".
+        AU4: clamp01(0.5 * soft01(-d.browInner, 0.8) + 0.3 * soft01(-d.browGap, 0.8) +
+          0.2 * soft01(-d.browSlope, 0.8)) * (1 - 0.6 * smileG),
+        // Palpebra superiore sollevata, occhio più aperto.
+        AU5: clamp01(0.6 * soft01(d.upperLid, 0.8) + 0.4 * soft01(d.eyeOpen, 0.8)),
+        // Palpebra inferiore che sale: con il sorriso è AU6, senza è AU7.
+        AU6: soft01(-d.lowerLid, 0.8) * smileG,
+        AU7: clamp01(0.7 * soft01(-d.lowerLid, 0.8) + 0.3 * soft01(-d.lowerLidCurve, 0.8)) * (1 - 0.85 * smileG),
+        // Ali del naso tirate verso gli occhi (naso arricciato) e labbro su.
+        AU9: soft01(-d.noseWing, 0.8) * (1 - 0.8 * smileG),
+        AU10: soft01(-d.philtrum, 0.8) * (1 - 0.8 * smileG),
+        // Angoli della bocca sopra / sotto il centro delle labbra.
+        AU12: soft01(d.mouthCorners, 0.8),
+        AU15: soft01(-d.mouthCorners, 0.6),
+        AU20: soft01(d.mouthWidth, 0.8) * (1 - soft01(d.mouthCorners, 0.5)),
+      };
+      for (const [id, gv] of Object.entries(g)) {
+        if (!calibrated && !GEO_UNCALIBRATED.has(id)) continue;
+        au[id] = GEO_WEAK_BLEND.has(id)
+          ? noisyOr(au[id], w * gv)
+          : clamp01((1 - 0.5 * w) * au[id] + 0.5 * w * gv);
+      }
+      // Palpebra superiore abbassata ("occhi pesanti").
+      au.AU43 = noisyOr(au.AU43, 0.5 * w * soft01(-d.upperLid, 1));
+      asym.corner = soft01(d.mouthCornerAsym - 0.3, 1);
+      asym.brow = Math.max(asym.brow, soft01(Math.max(d.browOuterAsym, d.browInnerAsym) - 0.3, 1));
+    }
     // Componente simmetrica del sorriso.
     const smileSym = 0.7 * Math.min(side.AU12.l, side.AU12.r) + 0.3 * smileAvg;
 
@@ -282,6 +339,7 @@ export class FacsEncoder {
       au,
       side,
       asym,
+      shapeD: d,
       smileSym,
       gaze,
       eyeClosure: Math.max(closeL, closeR) * 0.5 + avg(closeL, closeR) * 0.5,
@@ -312,6 +370,15 @@ export function buildCalibration(samples) {
       ear: median(samples.map((s) => s.geom.ear)),
       faceScale: median(samples.map((s) => s.geom.faceScale)),
     },
+    // Forma neutra della persona (se disponibile).
+    shape: samples[0]?.shape
+      ? SHAPE_NAMES.map((_, j) => median(samples.map((s) => s.shape[j])))
+      : undefined,
+    // Contorni neutri (per il confronto visivo nell'app).
+    contours: samples[0]?.contours
+      ? Object.fromEntries(Object.keys(samples[0].contours).map((k) => [k,
+        samples[0].contours[k].map((_, i) => [0, 1].map((c) => +median(samples.map((s) => s.contours[k][i][c])).toFixed(4)))]))
+      : undefined,
     pose: {
       yaw: median(samples.map((s) => s.pose.yaw)),
       pitch: median(samples.map((s) => s.pose.pitch)),

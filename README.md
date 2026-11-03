@@ -113,6 +113,36 @@ convertiti in AU:
 | AU34 / AU43 | Guance gonfie / occhi chiusi | `cheekPuff`, `eyeBlink*` (compensato per lo sguardo in basso) |
 | AU51–56 | Rotazioni della testa | matrice di trasformazione facciale |
 
+### 1b. Forma di sopracciglia, occhi e bocca
+Oltre ai blendshape, l'app misura direttamente sui 478 punti la **forma** del
+viso, in un riferimento solidale alla testa (costruito su angoli degli occhi e
+dorso del naso, quindi indipendente da rotazione e distanza; l'effetto
+dell'inclinazione su/giù è compensato):
+
+| Misura | Cosa indica |
+| --- | --- |
+| Altezza interna/esterna delle sopracciglia | AU1 / AU2 (su), AU4 (giù) |
+| **Inclinazione** delle sopracciglia | oblique con l'interno alzato (tristezza, paura) o **a V** (rabbia) |
+| **Arco** (curvatura) delle sopracciglia | arco accentuato nella sorpresa |
+| Distanza fra le sopracciglia | ravvicinate = corrugatore (paura, rabbia); distanziate nella sorpresa |
+| Apertura degli occhi, **curvatura** delle palpebre | AU5 (spalancati), AU7/AU43 (socchiusi) |
+| Palpebra inferiore | sale con il sorriso genuino (AU6) o la tensione (AU7) |
+| Angoli e curvatura delle labbra, asimmetria | AU12 / AU15, disprezzo (un solo angolo) |
+| Ali del naso, filtro labiale | AU9 / AU10 (dopo la calibrazione) |
+
+Su ~3.500 volti queste misure separano bene le emozioni: ad esempio
+nella rabbia le sopracciglia diventano a V (−0,7 deviazioni standard), nella
+paura si alzano all'interno e si avvicinano, nella sorpresa si alzano ad arco e
+si allontanano, nella gioia sale la palpebra inferiore, nel disprezzo
+l'asimmetria degli angoli della bocca vale +4,6.
+
+Ogni persona però ha una forma "a riposo" diversa (in media metà di
+un'espressione marcata): **senza calibrazione** la geometria corregge solo le AU
+che MediaPipe vede male (occhi spalancati, palpebra inferiore, angoli in giù),
+con un margine per l'anatomia; **dopo la calibrazione** il confronto è con il tuo
+viso neutro e conta per tutte. Il pannello *Forma di sopracciglia, occhi e
+bocca* mostra dal vivo i contorni raddrizzati sopra quelli neutri.
+
 ### 2. Le 8 emozioni di base
 Insieme di AffectNet: le 6 universali di Ekman + disprezzo + neutralità.
 
@@ -177,7 +207,11 @@ test) e 12 espressioni in posa.
 | Versione | Foto dal web | Media recall 6 classi | In posa |
 | --- | --- | --- | --- |
 | Prima versione (solo regole) | 49,4% | 30,5% | 10/12 |
-| Attuale, senza addestramento personale | 57,3% | 39,3% | 10/12 |
+| Attuale, senza calibrazione né addestramento | 57,3% | 39,3% | 10/12 |
+
+Senza calibrazione le misure di forma non cambiano questi numeri: il loro
+contributo arriva dopo la calibrazione e con l'addestramento personale, che
+questo dataset non permette di misurare (manca il viso neutro di ogni persona).
 
 Le foto dal web sono molto difficili (luce, angolazioni, etichette rumorose):
 anche i migliori sistemi commerciali restano sotto il 70% su dati simili. Per
@@ -245,6 +279,8 @@ js/main.js              avvio, fotocamera, ciclo di analisi, calibrazione, regis
 js/landmarker.js        inizializzazione MediaPipe (GPU con ripiego CPU)
 js/facs.js              blendshape → Action Unit FACS, calibrazione
 js/emotions.js          8 emozioni (regole FACS), emozioni composte, valenza/attivazione, micro-espressioni
+js/shape.js             forma di sopracciglia, palpebre e labbra (curvatura, inclinazione, riferimento del viso)
+js/shape-data.js        riferimenti di forma misurati sui dati (generato da tools/model)
 js/features.js          vettore di feature per i modelli appresi
 js/model.js             modello globale e modello personale
 js/model-data.js        pesi del modello globale (generati da tools/model)
@@ -270,7 +306,7 @@ tools/model/            estrazione feature e addestramento del modello globale
 ## Test
 
 ```bash
-npm test                                   # 39 test unitari, nessuna dipendenza
+npm test                                   # 44 test unitari, nessuna dipendenza
 python3 -m http.server 8000 &
 node tests/e2e/privacy-smoke.mjs           # richiede Playwright + Chromium
 ```

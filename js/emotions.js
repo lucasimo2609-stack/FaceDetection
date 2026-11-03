@@ -36,6 +36,17 @@ export function scoreEmotions(f, ctx = {}) {
   const AU20 = a.AU20 * (1 - 0.5 * talk);
   const smileL = f.side.AU12.l, smileR = f.side.AU12.r;
   const minSmile = Math.min(smileL, smileR);
+  // Forma di sopracciglia e palpebre (se disponibile, vedi shape.js):
+  // arch > 0 sopracciglio ad arco; slope > 0 obliquo con l'interno alzato,
+  // < 0 "a V"; lidDown > 0 palpebra superiore abbassata.
+  const d = f.shapeD;
+  const arch = d ? soft(d.browArch, 0.8) : 0;
+  const oblique = d ? soft(d.browSlope, 0.8) : 0;
+  const vShape = d ? soft(-d.browSlope, 0.8) : 0;
+  const lidDown = d ? soft(-d.upperLid, 0.8) : 0;
+  // Sopracciglia ravvicinate (AU4 della paura) vs allontanate (sorpresa): è la
+  // distanza fra le sopracciglia, non l'obliquità, a separare le due.
+  const knit = d ? soft(0.2 - d.browGap, 0.6) : 0;
 
   // Gioia — AU12 (+ AU6 nel sorriso di Duchenne).
   let joy = soft(f.smileSym, 0.7) * (0.7 + 0.3 * soft(a.AU6, 0.45));
@@ -48,7 +59,9 @@ export function scoreEmotions(f, ctx = {}) {
   const sadBrow = a.AU1 * (0.4 + 0.6 * soft(a.AU4, 0.4));
   const pout = 0.7 * a.AU17 * (0.3 + 0.7 * soft(Math.max(a.AU15, a.AU1), 0.3));
   const sadMouth = Math.max(a.AU15, pout);
-  let sadness = noisyOr(0.75 * soft(sadBrow, 0.55), 0.8 * soft(sadMouth, 0.5));
+  // Palpebre "pesanti" contano solo insieme a un altro segno di tristezza.
+  const sadEyes = 0.4 * lidDown * soft(Math.max(a.AU15, a.AU1, oblique), 0.3);
+  let sadness = noisyOr(0.75 * soft(sadBrow, 0.55), 0.8 * soft(sadMouth, 0.5), sadEyes);
   sadness *= 1 - 0.85 * soft(a.AU12, 0.45);
   sadness *= 1 - 0.6 * soft(a.AU2, 0.5);
   sadness *= 1 - 0.4 * soft(a.AU5, 0.5);
@@ -63,7 +76,9 @@ export function scoreEmotions(f, ctx = {}) {
   // ("eyebrow flash") sono più spesso interesse/enfasi che sorpresa.
   const browUp = 0.6 * Math.min(a.AU1, a.AU2) + 0.4 * (a.AU1 + a.AU2) / 2;
   const jawDrop = Math.max(0.3 * a.AU25, a.AU26) * (1 - 0.7 * talk);
-  let surprise = clamp01(0.5 * soft(browUp, 0.55) + 0.25 * soft(a.AU5, 0.45) + 0.25 * soft(jawDrop, 0.5));
+  // Nella sorpresa le sopracciglia si alzano formando un arco regolare.
+  let surprise = clamp01(0.5 * soft(browUp, 0.55) + 0.25 * soft(a.AU5, 0.45) + 0.25 * soft(jawDrop, 0.5) +
+    0.1 * arch * soft(browUp, 0.2));
   surprise *= soft(browUp + 0.5 * a.AU5, 0.35);
   surprise *= 0.45 + 0.55 * soft(Math.max(a.AU5, jawDrop), 0.3);
   surprise *= 1 - 0.75 * soft(a.AU4, 0.4);
@@ -71,6 +86,8 @@ export function scoreEmotions(f, ctx = {}) {
   surprise *= 1 - 0.3 * soft(a.AU9, 0.4);
   surprise *= 1 - 0.6 * soft(Math.max(a.AU7, a.AU43), 0.5); // occhi stretti: non è sorpresa
   surprise *= 1 - 0.5 * soft(grimace, 0.35);
+  // Sopracciglia alzate MA ravvicinate (obliquità + AU4): è paura.
+  surprise *= 1 - 0.5 * soft(oblique * knit - 0.2, 0.5);
 
   // Paura — AU1 + AU2 + AU4 + AU5 + AU7 + AU20 + AU26. MediaPipe tende a
   // leggere la bocca stirata della paura come sorriso + labbro sollevato:
@@ -78,10 +95,10 @@ export function scoreEmotions(f, ctx = {}) {
   const fearBrow = Math.max(gmean(Math.max(a.AU1, 0.8 * a.AU2), a.AU4), 0.8 * soft(a.AU1, 0.5));
   const fearMouth = Math.max(AU20, grimace);
   let fear = clamp01(0.35 * soft(fearBrow, 0.45) + 0.3 * soft(a.AU5, 0.4) + 0.25 * soft(fearMouth, 0.4) +
-    0.1 * soft(mouthOpen, 0.5));
+    0.1 * soft(mouthOpen, 0.5) + 0.1 * oblique * knit);
   fear *= soft(Math.max(a.AU5, fearMouth), 0.25) * soft(Math.max(a.AU1, 0.7 * a.AU2), 0.2);
   // AU4 e/o labbra stirate distinguono la paura dalla sorpresa.
-  fear *= 0.35 + 0.65 * soft(Math.max(a.AU4, fearMouth), 0.25);
+  fear *= 0.35 + 0.65 * soft(Math.max(a.AU4, fearMouth, 0.6 * oblique * knit), 0.25);
   fear *= 1 - 0.7 * soft(a.AU12, 0.5) * (0.4 + 0.6 * soft(a.AU6, 0.3));
   fear *= 1 - 0.3 * soft(a.AU9, 0.4);
   fear *= 1 - 0.6 * soft(a.AU7, 0.5) * (1 - soft(a.AU5, 0.3));
@@ -89,15 +106,16 @@ export function scoreEmotions(f, ctx = {}) {
 
   // Rabbia — AU4 + AU5 + AU7 + AU23/AU24 (+AU17, AU10).
   const lips = Math.max(a.AU23, a.AU24);
+  // Sopracciglia abbassate e a V (l'interno scende più dell'esterno).
   let anger = clamp01(0.4 * soft(a.AU4, 0.5) + 0.15 * soft(a.AU5, 0.4) + 0.15 * soft(a.AU7, 0.5) +
-    0.2 * soft(lips, 0.5) + 0.1 * soft(Math.max(a.AU17, a.AU10), 0.5));
+    0.2 * soft(lips, 0.5) + 0.1 * soft(Math.max(a.AU17, a.AU10), 0.5) + 0.1 * vShape);
   // Sopracciglia basse + occhi stretti da soli sono spesso un viso "serio" a
   // riposo: serve un secondo indizio (labbra serrate, occhi sgranati, bocca
   // aperta come nell'urlo).
   const shout = gmean(soft(a.AU4, 0.4), soft(Math.max(a.AU26, a.AU16), 0.4));
   anger *= soft(a.AU4 - 0.1, 0.3);
   // Un AU4 molto marcato (aggrottare con forza) basta anche da solo.
-  anger *= 0.25 + 0.75 * Math.max(soft(Math.max(a.AU5, lips, shout, 0.5 * a.AU7, 0.6 * a.AU10), 0.35), soft(a.AU4 - 0.45, 0.35));
+  anger *= 0.25 + 0.75 * Math.max(soft(Math.max(a.AU5, lips, shout, 0.5 * a.AU7, 0.6 * a.AU10, 0.5 * vShape), 0.35), soft(a.AU4 - 0.45, 0.35));
   anger *= 1 - 0.7 * soft(a.AU1, 0.5);
   anger *= 1 - 0.6 * soft(a.AU12, 0.5);
 
@@ -115,7 +133,8 @@ export function scoreEmotions(f, ctx = {}) {
 
   // Disprezzo — sollevamento/tensione unilaterale dell'angolo della bocca.
   // L'asimmetria delle fossette (AU14) è rumorosa: pesa la metà del sorriso.
-  const asym = Math.max(f.asym.AU12, 0.5 * f.asym.AU14, 0.6 * f.asym.AU10);
+  // asym.corner = un angolo della bocca più alto dell'altro (geometria).
+  const asym = Math.max(f.asym.AU12, 0.5 * f.asym.AU14, 0.6 * f.asym.AU10, 0.8 * (f.asym.corner || 0));
   let contempt = soft(asym - 0.15, 0.3) *
     (0.6 + 0.4 * soft(Math.max(a.AU14, Math.max(smileL, smileR)), 0.4));
   contempt = Math.max(contempt, 0.45 * soft(a.AU14, 0.6) * (1 - soft(a.AU12, 0.4)));

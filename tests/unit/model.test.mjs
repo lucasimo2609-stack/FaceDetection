@@ -2,7 +2,9 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MODEL } from '../../js/model-data.js';
 import { predictGlobal, featureOffset, combineProbs, PersonalModel } from '../../js/model.js';
-import { featureVector, FEATURE_NAMES } from '../../js/features.js';
+import { featureVector, personalVector, FEATURE_NAMES } from '../../js/features.js';
+import { SHAPE_DATA } from '../../js/shape-data.js';
+import { SHAPE_NAMES } from '../../js/shape.js';
 import { Analyzer } from '../../js/analyzer.js';
 import { EMOTION_IDS } from '../../js/emotions.js';
 import { blendshapes, restGeom, fakeResult } from './helpers.mjs';
@@ -57,13 +59,23 @@ const PERSON = {
   sadness: { browInnerUp: 0.5, mouthFrownLeft: 0.2, mouthFrownRight: 0.2, mouthShrugLower: 0.3, eyeLookDownLeft: 0.3, eyeLookDownRight: 0.3 },
   anger: { browDownLeft: 0.7, browDownRight: 0.7, eyeSquintLeft: 0.6, eyeSquintRight: 0.6, mouthPressLeft: 0.3, mouthPressRight: 0.3 },
 };
+// Forma (in unità di "espressione marcata") tipica di ciascuna espressione.
+const PERSON_SHAPE = {
+  neutral: {},
+  joy: { mouthCorners: 1.2, mouthWidth: 0.8, lowerLid: -0.8 },
+  surprise: { browInner: 1, browOuter: 1, browArch: 0.6, eyeOpen: 0.8, mouthOpen: 1 },
+  sadness: { browSlope: 1, browInner: 0.6, mouthCorners: -0.8, upperLid: -0.6 },
+  anger: { browInner: -0.9, browSlope: -0.8, browGap: -0.8, lowerLid: -0.5 },
+};
 function frames(id, n, seed, scale = 1) {
   const r = rng(seed);
   const out = [];
   for (let i = 0; i < n; i++) {
     const over = {};
     for (const [k, v] of Object.entries(PERSON[id])) over[k] = 0.003 + (v - 0.003) * scale + r() * 0.04;
-    out.push(featureVector(blendshapes(over), restGeom()));
+    const shape = SHAPE_NAMES.map((name, j) => SHAPE_DATA.neutralMedian[j] +
+      SHAPE_DATA.scale[j] * ((PERSON_SHAPE[id][name] ?? 0) * scale + r() * 0.15));
+    out.push(personalVector(blendshapes(over), restGeom(), shape));
   }
   return out;
 }

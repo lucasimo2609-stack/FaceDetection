@@ -148,3 +148,58 @@ export class Circumplex {
     }
   }
 }
+
+// Forma dal vivo di sopracciglia, occhi e labbra nel riferimento del viso
+// (testa "raddrizzata"), confrontata con il viso neutro di riferimento.
+// Con la calibrazione il riferimento è il viso della persona e le differenze
+// vengono ingrandite per renderle visibili.
+export class ShapeView {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+    this.mirror = true;
+  }
+
+  draw(contours, reference, { amplify = 1, color = '#38bdf8' } = {}) {
+    const { ctx } = this;
+    const { w, h, dpr } = fitCanvas(this.canvas);
+    ctx.clearRect(0, 0, w, h);
+    if (!contours || !reference) return;
+    // Area del disegno: da sopracciglia (v≈+0.45) a labbra (v≈-1.35).
+    const uMin = -0.75, uMax = 0.75, vMin = -1.5, vMax = 0.6;
+    const s = Math.min(w / (uMax - uMin), h / (vMax - vMin));
+    const ox = w / 2, oy = (h - (vMax - vMin) * s) / 2 + vMax * s;
+    const X = (u) => ox + (this.mirror ? -u : u) * s;
+    const Y = (v) => oy - v * s;
+    const path = (pts, closed) => {
+      ctx.beginPath();
+      pts.forEach(([u, v], i) => (i ? ctx.lineTo(X(u), Y(v)) : ctx.moveTo(X(u), Y(v))));
+      if (closed) ctx.closePath();
+    };
+    const grid = cssVar('--grid', 'rgba(148,163,184,0.18)');
+    const muted = cssVar('--muted', '#94a3b8');
+    for (const [k, ref] of Object.entries(reference)) {
+      const cur = contours[k];
+      if (!cur) continue;
+      const shown = amplify === 1 ? cur : cur.map(([u, v], i) => [ref[i][0] + amplify * (u - ref[i][0]), ref[i][1] + amplify * (v - ref[i][1])]);
+      ctx.setLineDash([4 * dpr, 4 * dpr]);
+      ctx.strokeStyle = muted;
+      ctx.lineWidth = 1.5 * dpr;
+      path(ref, true);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = `${color}22`;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5 * dpr;
+      path(shown, true);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.fillStyle = muted;
+    ctx.font = `${10 * dpr}px system-ui, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(amplify === 1 ? 'tratteggio: viso neutro medio' : `tratteggio: il tuo viso neutro · differenze ×${amplify}`, 6 * dpr, h - 4 * dpr);
+    void grid;
+  }
+}

@@ -104,7 +104,21 @@
         </div>
       </section>
 
-      <section class="card order-5">
+      <section class="card order-5 shape-card">
+        <div class="card-head">
+          <h2>Forma di sopracciglia, occhi e bocca</h2>
+          <span id="shape-ref" class="hint">rispetto a un viso medio</span>
+        </div>
+        <div class="shape-grid">
+          <canvas id="shape-view" class="chart shape-canvas" aria-label="Contorni di sopracciglia, occhi e labbra"></canvas>
+          <div>
+            <p id="shape-summary" class="shape-summary">—</p>
+            <div id="shape-meters" class="shape-meters"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card order-6">
         <div class="card-head">
           <h2>Andamento (ultimi 60 s)</h2>
         </div>
@@ -112,7 +126,7 @@
         <div id="timeline-legend" class="legend"></div>
       </section>
 
-      <section class="card order-6 split">
+      <section class="card order-7 split">
         <div>
           <h2>Valenza / attivazione</h2>
           <canvas id="circumplex" class="chart square"></canvas>
@@ -168,7 +182,7 @@
         <div id="states" class="bars states"></div>
       </section>
 
-      <section class="card order-7">
+      <section class="card order-8">
         <div class="card-head">
           <h2>Micro-espressioni</h2>
           <span class="hint">picchi &lt; 0,5 s</span>
@@ -177,7 +191,7 @@
         <ul id="micro-list" class="micro-list"></ul>
       </section>
 
-      <details class="card order-8">
+      <details class="card order-9">
         <summary><h2>Action Unit FACS</h2><span class="hint">intensità A–E</span></summary>
         <div id="aus" class="aus"></div>
         <div class="calib-status">
@@ -212,6 +226,7 @@
     <ol class="steps">
       <li><strong>Rilevamento</strong> — MediaPipe Face Landmarker individua 478 punti del volto e calcola 52 coefficienti di espressione (blendshape) e la posa 3D della testa.</li>
       <li><strong>Codifica FACS</strong> — i coefficienti vengono convertiti in 24 Action Unit del Facial Action Coding System (Ekman &amp; Friesen), con intensità A–E, correggendo gli effetti collaterali tipici (es. il sorriso ampio che abbassa le sopracciglia).</li>
+      <li><strong>Forma</strong> — dai punti del volto, con la testa "raddrizzata", si misurano curvatura e inclinazione di sopracciglia e palpebre, distanza fra le sopracciglia, angoli e curvatura delle labbra: ad esempio sopracciglia a V nella rabbia, oblique nella tristezza e nella paura, ad arco nella sorpresa. Dopo la calibrazione il confronto è con il tuo viso neutro.</li>
       <li><strong>8 emozioni di base</strong> — neutralità, gioia, tristezza, sorpresa, paura, rabbia, disgusto, disprezzo: combinano le regole FACS (EMFACS), un modello statistico addestrato su migliaia di volti e, se l'hai fatto, il tuo addestramento personale. Se due emozioni sono presenti insieme viene indicata l'emozione composta (es. sorpresa + gioia = meraviglia).</li>
       <li><strong>12 stati sottili</strong> — concentrazione, interesse, confusione, scetticismo, noia, stanchezza, ansia, frustrazione, imbarazzo, sorriso di cortesia, riflessione, orgoglio: combinano AU deboli, posa della testa, sguardo e dinamiche nel tempo (frequenza degli ammiccamenti, PERCLOS, sbadigli, movimento, parlato).</li>
     </ol>

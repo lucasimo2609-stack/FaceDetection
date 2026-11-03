@@ -9,7 +9,8 @@ import {
   DominantTracker, MicroExpressionDetector, EMOTION_IDS,
 } from './emotions.js';
 import { scoreStates, attentionLevel } from './states.js';
-import { featureVector } from './features.js';
+import { featureVector, personalVector, FEATURE_NAMES, PERSONAL_FEATURE_NAMES } from './features.js';
+import { shapeFeatures, shapeContours, shapeDeltas, shrinkDeltas } from './shape.js';
 import { predictGlobal, featureOffset, combineProbs, PersonalModel } from './model.js';
 import { EmaVector, emaAlpha, clamp01, soft } from './util.js';
 
@@ -103,7 +104,12 @@ export class Analyzer {
   loadPersonal() {
     try {
       const raw = this.storage?.getItem(PERSONAL_KEY);
-      if (raw) this.personal = new PersonalModel(JSON.parse(raw));
+      const data = raw ? JSON.parse(raw) : null;
+      // Modelli salvati con una versione precedente delle feature: da rifare.
+      if (data && data.version === PersonalModel.VERSION &&
+        data.centroids?.neutral?.length === PERSONAL_FEATURE_NAMES.length) {
+        this.personal = new PersonalModel(data);
+      }
     } catch { this.personal = null; }
   }
 
@@ -201,9 +207,13 @@ export class Analyzer {
     const geom = geometry(lm, width, height);
     const rawPose = headPose(result, width, height);
 
-    const xRaw = featureVector(b, geom);
-    if (this.calibrating) this.feedCalibration(t, { b, geom, pose: rawPose });
-    if (this.capturing) this.feedCapture(t, { b, geom, pose: rawPose, x: xRaw });
+    // Forma di sopracciglia, palpebre e bocca nel riferimento del viso.
+    const shape = shapeFeatures(lm, width, height);
+    // Vettore completo (globale + forma); i primi elementi sono quelli globali.
+    const xRaw = personalVector(b, geom, shape);
+    const contours = shapeContours(lm, width, height);
+    if (this.calibrating) this.feedCalibration(t, { b, geom, pose: rawPose, shape, contours });
+    if (this.capturing) this.feedCapture(t, { b, geom, pose: rawPose, shape, x: xRaw });
 
     const p0 = this.calibration?.pose || { yaw: 0, pitch: 0, roll: 0 };
     const pose = this.poseSmooth.update({
@@ -212,7 +222,7 @@ export class Analyzer {
       roll: rawPose.roll - p0.roll,
     }, dt);
 
-    const facs = this.encoder.encode(b, geom);
+    const facs = this.encoder.encode(b, geom, shape);
     const scale0 = this.calibration?.geom?.faceScale;
     facs.leanIn = scale0 ? soft(geom.faceScale / scale0 - 1.06, 0.18) : 0;
 
@@ -238,8 +248,9 @@ export class Analyzer {
 
     // Tre fonti: regole FACS, modello globale appreso, modello personale.
     const xs = this.featSmooth.update(xRaw, dt, 140 * k);
+    const xg = xs.slice(0, FEATURE_NAMES.length);
     const off = this.calibration?.featOffset;
-    const pGlobal = predictGlobal(off ? xs.map((v, j) => v - off[j]) : xs);
+    const pGlobal = predictGlobal(off ? xg.map((v, j) => v - off[j]) : xg);
     const pRules = emotionProbabilities(ruleScores);
     let pPersonal = null, personalIntensity = null;
     if (this.personal) {
@@ -294,6 +305,13 @@ export class Analyzer {
       emotions,
       probs,
       sources: { rules: pRules, global: pGlobal, personal: pPersonal },
+      // Scarti di forma dal neutro per la visualizzazione: rispetto al viso
+      // della persona se calibrato, altrimenti al viso medio con un margine
+      // (più leggero di quello usato dalle regole) per l'anatomia individuale.
+      shape: this.calibration?.shape
+        ? shapeDeltas(shape, this.calibration.shape)
+        : shrinkDeltas(shapeDeltas(shape), 0.75),
+      contours,
       dominant,
       blend,
       micro,
